@@ -6,10 +6,11 @@
 #define DIR_PIN    12   // D6
 #define ENA_PIN    14   // D5
 #define LIMIT_BOTTOM 5  // D1 (pull-up interne)
+#define BUTTON_PIN 4  // D2, (pull-up interne)
 
 // -------------------- Paramètres WIFI --------------------
-#define WIFI_SSID ",,,"
-#define WIFI_PWD  ",,,"
+#define WIFI_SSID "TELUS7704"
+#define WIFI_PWD  "B6hxR6CHJ87n"
 
 static const int   FULL_STEPS_PER_REV = 200;
 static const int   MICROSTEP_FACTOR   = 10;// devrait le combiner avec FULL_STEPS_PER_REV *****
@@ -19,7 +20,7 @@ static const bool  ENA_ACTIVE_LOW     = true;
 
 static const float OPEN_TURNS_DEFAULT = 10.0f; // Nombre de tgour à l'ouverture
 static const float VMAX_REV_S_DEFAULT = 1.6f;
-static const float ACCEL_REV_S2_DEF   = 0.2f; //semble ici pour le 1000000 d'acceleration sur le webUI
+static const float ACCEL_REV_S2_DEF   = 0.0002f; //semble ici pour le 1000000 d'acceleration sur le webUI
 
 // Conversion tours/s -> steps/s, etc.
 static const long  kStepsPerRev   = (long)(FULL_STEPS_PER_REV * MICROSTEP_FACTOR);

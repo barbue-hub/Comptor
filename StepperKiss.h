@@ -91,6 +91,10 @@ public:
     _nextStepUs = 0;
   }
 
+  void openCloseButton(){
+    
+  }
+
   // Retourne true si un pas vient d'être émis
   bool run() {
     const unsigned long now = micros();

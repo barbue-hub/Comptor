@@ -34,23 +34,27 @@ enum class Cmd : uint8_t { NONE, OPEN, CLOSE, STOP };
 // Initialise à NONE
 static volatile Cmd pendingCmd = Cmd::NONE;
 
+// Mémorise la dernière commande OPEN/CLOSE exécutée ou programmée.
+// L’état initial est CLOSE pour qu’un premier appui demande une ouverture.
+static Cmd lastToggle = Cmd::CLOSE;
+
 // Variables de contrôle
 static unsigned long homingStartMs = 0;
 static unsigned long lastCalibSeen = 0;
 static unsigned long cycles = 0;
 static bool openedSinceLastClose = false;
 float cm_to_tour = 0;
+
 // -------------------- LECTURE NANO GÉNÉRIQUE --------------------
-// cmdChar : caractère de commande à envoyer (ex.: 'D' pour distance, 'T' pour température)
-// prefix  : préfixe attendu dans la réponse (ex.: "$DST:", "$TMP:")
-// timeoutMs : durée max (ms) d'attente de la réponse.
 static inline float requestNanoValue(char cmdChar, const char* prefix, unsigned long timeoutMs = 2000) {
   while (Serial.available() > 0) Serial.read();  // purge
   Serial.write(cmdChar);
   unsigned long startMs = millis();
   String buf;
 
-  auto isPrintable = [](char c) { return c >= 32 && c <= 126; };
+  auto isPrintable = [](char c) {
+    return c >= 32 && c <= 126;
+  };
 
   while (millis() - startMs < timeoutMs) {
     while (Serial.available() > 0) {
@@ -96,148 +100,168 @@ inline float requestNanoTemperature(unsigned long timeoutMs = 2000) {
 //**************************************** PENDING COMMAND ****************************************
 //-------------------------------------------------------------------------------------------------------------------------------------------------------
 static void fsmTick() {
-  //-------------------------------------------------------------------------------
-  //******************************* PENDING COMMAND *******************************
-  //-------------------------------------------------------------------------------
+  // Gestion du bouton : si appui, soit on arrête le mouvement en cours, soit on inverse la commande lorsque le moteur est à l’arrêt.
+  if (ctrl.readButton()) {
+    WebUI::addLog(String("[DEBUG] Bouton appuyé: st=") + String((int)st) +
+                  ", moving=" + (ctrl.isMoving() ? "true" : "false") +
+                  ", lastToggle=" + (lastToggle == Cmd::OPEN ? "OPEN" : "CLOSE"));
+
+    // Si un mouvement est en cours, demander un arrêt
+    if (ctrl.isMoving()) {
+      if (st != State::STOPPING) {
+        pendingCmd = Cmd::STOP;
+        WebUI::addLog("[BUTTON] Stop demandé");
+      }
+    }
+    // Sinon, inverser la commande en IDLE
+    else if (st == State::IDLE) {
+      lastToggle = (lastToggle == Cmd::OPEN ? Cmd::CLOSE : Cmd::OPEN);
+      pendingCmd = lastToggle;
+      if (pendingCmd == Cmd::OPEN) {
+        WebUI::addLog("[BUTTON] Ouverture demandée");
+      } else {
+        WebUI::addLog("[BUTTON] Fermeture demandée");
+      }
+    }
+  }
+
+  //----------------------------- PENDING COMMAND -----------------------------
   switch (pendingCmd) {
-    // --------------- PENDING CMD STOP --------------
     case Cmd::STOP:
+      // Arrêt immédiat : stoppe le moteur et revient en IDLE
       ctrl.stop();
-      st = State::STOPPING;
+      st = State::IDLE;
+      WebUI::addLog("[DEBUG] pendingCmd STOP → IDLE");
+      WebUI::addLog("[FSM] IDLE");
       pendingCmd = Cmd::NONE;
-      WebUI::addLog("[FSM] STOPPING");
       break;
 
-    // --------------- PENDING CMD OPEN --------------
     case Cmd::OPEN:
       if (st == State::IDLE) {
-        // fixer la direction d'ouverture (+1)
+        // mémoriser la direction demandée immédiatement
+        lastToggle = Cmd::OPEN;
+        // fixer la direction d’ouverture (+1)
         ctrl.motor.setDirection(1);
         ctrl.open();
         st = State::OPENING;
-        pendingCmd = Cmd::NONE;
+        WebUI::addLog("[DEBUG] pendingCmd OPEN → OPENING");
         WebUI::addLog("[FSM] OPENING");
       } else if (st == State::CLOSING) {
+        // arrêt immédiat si on était en fermeture
         ctrl.stop();
-        st = State::STOPPING;
-        WebUI::addLog("[FSM] STOPPING");
+        st = State::IDLE;
+        WebUI::addLog("[DEBUG] pendingCmd OPEN during CLOSING → IDLE");
+        WebUI::addLog("[FSM] IDLE");
       }
+      pendingCmd = Cmd::NONE;
       break;
 
-    // --------------- PENDING CMD CLOSE --------------
     case Cmd::CLOSE:
       if (st == State::IDLE) {
-        // fixer la direction de fermeture (-1)
+        // mémoriser la direction demandée immédiatement
+        lastToggle = Cmd::CLOSE;
+        // fixer la direction de fermeture (−1)
         ctrl.motor.setDirection(-1);
         ctrl.close();
         st = State::CLOSING;
-        pendingCmd = Cmd::NONE;
+        WebUI::addLog("[DEBUG] pendingCmd CLOSE → CLOSING");
         WebUI::addLog("[FSM] CLOSING");
       } else if (st == State::OPENING) {
+        // arrêt immédiat si on était en ouverture
         ctrl.stop();
-        st = State::STOPPING;
-        WebUI::addLog("[FSM] STOPPING");
+        st = State::IDLE;
+        WebUI::addLog("[DEBUG] pendingCmd CLOSE during OPENING → IDLE");
+        WebUI::addLog("[FSM] IDLE");
       }
+      pendingCmd = Cmd::NONE;
       break;
 
-    // --------------- PENDING CMD NONE --------------
     case Cmd::NONE:
-    default: break;
+    default:
+      break;
   }
 
-  //-----------------------------------------------------------------------------------------------
-  //******************************* GESTION DES TRANSITIONS STATE *******************************
-  //-----------------------------------------------------------------------------------------------
+  //--------------- GESTION DES TRANSITIONS STATE ---------------
   switch (st) {
-    // --------------- STATE BOOT --------------
-    case State::BOOT:
-      {
-        float bootDistanceCm = requestNanoDistance();
-        if (bootDistanceCm >= 0.0f) {
-          WebUI::addLog("[FSM] Tours avant fermeture : " + String(bootDistanceCm/25.446));
-          //WebUI::addLog("[FSM] Distance avant fermeture : " + String(bootDistanceCm)); 
-        } else {
-          WebUI::addLog("[FSM] Distance invalide ou absence de réponse");
-        }
-
-        st = State::HOMING_START;
-        WebUI::addLog("[FSM] HOMING START");
+    case State::BOOT: {
+      float bootDistanceCm = requestNanoDistance();
+      if (bootDistanceCm >= 0.0f) {
+        WebUI::addLog("[FSM] Tours avant fermeture : " + String(bootDistanceCm / 25.446));
+      } else {
+        WebUI::addLog("[FSM] Distance invalide ou absence de réponse");
       }
-      break;
+      st = State::HOMING_START;
+      WebUI::addLog("[FSM] HOMING START");
+    } break;
 
-    // --------------- STATE HOMING START --------------
-    case State::HOMING_START:
-    {
-      float BootDistanceTurn = (long)(requestNanoDistance()/25.446f) * kStepsPerRev + 0.5f; 
+    case State::HOMING_START: {
+      float BootDistanceTurn = (requestNanoDistance() / 25.446f) * kStepsPerRev;
       homingStartMs = millis();
       lastCalibSeen = ctrl.lastCalibMs();
-
-      if (BootDistanceTurn > 0){
+      if (BootDistanceTurn > 0.2f) {
         ctrl.motor.setCurrentPosition(BootDistanceTurn);
         ctrl.motor.setDirection(-1);
         ctrl.motor.moveTo(0);
-      }
-      else{
+        WebUI::addLog("[FSM] Distance sécuritaire pour ouverture contrôlée " + String(BootDistanceTurn));
+      } else {
         ctrl.motor.setMaxSpeed(1600);
         ctrl.motor.setAcceleration(400);
         ctrl.motor.setDirection(-1);
         ctrl.motor.move(-kHomingTravel);
+        WebUI::addLog("[FSM] Distance non-sécuritaire, ouverture lente " + String(BootDistanceTurn));
       }
       st = State::HOMING_RUN;
       WebUI::addLog("[FSM] HOMING");
-      break; 
-    }
-    // --------------- STATE HOMING RUN --------------
-    case State::HOMING_RUN:
-      {
-        // Terminé si latched (lastCalibMs change) ou si plus de mouvement vers 0
-        bool homed = (ctrl.lastCalibMs() != lastCalibSeen);
-        bool timeout = (millis() - homingStartMs) > kHomingTimeoutMs;
-        if (homed || (!ctrl.isMoving() && ctrl.motor.currentPosition() == 0)) {
-          ctrl.setMaxSpeedSteps(kVmaxSteps);
-          ctrl.setAccelerationSteps2(kAccelSteps2);
-          st = State::IDLE;
-          WebUI::addLog("[FSM] IDLE");
-        } else if (timeout) {
-          st = State::FAULT;
-          WebUI::addLog("[FSM] FAULT");
-        }
-      }
       break;
+    }
 
-    // --------------- STATE IDLE --------------
+    case State::HOMING_RUN: {
+      bool homed = (ctrl.lastCalibMs() != lastCalibSeen);
+      bool timeout = (millis() - homingStartMs) > kHomingTimeoutMs;
+      if (homed || (!ctrl.isMoving() && ctrl.motor.currentPosition() == 0)) {
+        ctrl.setMaxSpeedSteps(kVmaxSteps);
+        ctrl.setAccelerationSteps2(kAccelSteps2);
+        st = State::IDLE;
+        lastToggle = Cmd::CLOSE;  // après homing, le volet est fermé
+        WebUI::addLog("[FSM] IDLE");
+      } else if (timeout) {
+        st = State::FAULT;
+        WebUI::addLog("[FSM] FAULT");
+      }
+    } break;
+
     case State::IDLE:
       break;
 
-    // --------------- STATE OPENING --------------
     case State::OPENING:
       if (!ctrl.isMoving()) {
         openedSinceLastClose = true;
+        lastToggle = Cmd::OPEN;
         st = State::IDLE;
+        WebUI::addLog("[DEBUG] Fin OPENING -> IDLE");
         WebUI::addLog("[FSM] IDLE");
       }
       break;
 
-    // --------------- STATE CLOSING --------------
     case State::CLOSING:
       if (!ctrl.isMoving()) {
         if (openedSinceLastClose) {
           cycles++;
           openedSinceLastClose = false;
         }
+        lastToggle = Cmd::CLOSE;
         st = State::IDLE;
+        WebUI::addLog("[DEBUG] Fin CLOSING -> IDLE");
         WebUI::addLog("[FSM] IDLE");
       }
       break;
 
-    // --------------- STATE STOPPING --------------
     case State::STOPPING:
-      if (!ctrl.isMoving()) st = State::IDLE;
+      // Traiter STOPPING comme IDLE : plus de ralentissement intermédiaire
+      st = State::IDLE;
       break;
 
-    // --------------- STATE FAULT --------------
     case State::FAULT:
-      // Rester en faute jusqu’à commande STOP, puis relancer homing
       if (pendingCmd == Cmd::STOP) {
         pendingCmd = Cmd::NONE;
         st = State::HOMING_START;
