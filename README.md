@@ -121,8 +121,7 @@ steps  = round(turns * kStepsPerRev)
 
 ## Licence
 
-MIT (ou ajuster selon vos besoins).
-
+Apache 2.0
 ---
 
 **Astuce description GitHub (<350 caract.)**
