@@ -128,10 +128,10 @@ public:
 
     // Intervalle souhaité (us) en fonction de la vitesse instantanée
     float sps = fabsf(_speed);
-    if (sps < 0.5f) { // trop lent -> ne planifie pas de pas
-      _nextStepUs = 0;
-      return false;
-    }
+    // if (sps < 0.5f) { // trop lent -> ne planifie pas de pas
+    //   _nextStepUs = 0;
+    //   return false;
+    // }
     _stepIntervalUs = (unsigned long)(1000000.0f / sps);
 
     // Planification initiale si nécessaire
