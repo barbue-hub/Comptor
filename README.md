@@ -1,129 +1,130 @@
-# Comptoir motorisé — ESP8266 + Nano
+Comptoir motorisé — ESP8266 + Nano
 
-Pilotage d’un comptoir motorisé (NEMA23 + DM556) via ESP8266 (WebUI) et Arduino Nano (capteurs). Homing sur fin de course **bas** avec estimation de distance fournie par la Nano. Moteur géré par **StepperKiss** (accélération/décélération lissées).
+Pilotage d’un comptoir motorisé (NEMA23 + DM556) via ESP8266 (WebUI) et Arduino Nano (capteurs).
+Le système effectue un homing automatique sur fin de course bas avec estimation de la distance fournie par la Nano.
+Un bouton physique permet de commander ouverture, fermeture et arrêt localement.
+Le moteur est géré par StepperKiss, assurant des rampes d’accélération et décélération fluides.
 
-## Matériel
+Fonctionnalités principales
 
-* ESP8266 (ex. NodeMCU)
-* Arduino Nano (capteur distance + température)
-* Driver pas-à-pas DM556 (ou équivalent)
-* Moteur NEMA 23
-* Fin de course bas (contact NO/NC)
-* Transmission **pignon-crémaillère** (pignon pas ≈ 25.4466 cm/tour)
+Homing automatique intelligent (vitesse ajustée si mesure invalide)
 
-## Câblage (ESP8266 → Driver/Capteurs)
+Lecture série Nano : distance et température
 
-| Signal            | Pin ESP8266                 |
-| ----------------- | --------------------------- |
-| STEP              | D7 (GPIO13)                 |
-| DIR               | D6 (GPIO12)                 |
-| ENA               | D5 (GPIO14)                 |
-| Fin de course bas | D1 (GPIO5, pull-up interne) |
+Contrôle manuel via bouton physique (toggle open/close, arrêt en cours)
 
-> `ENA_ACTIVE_LOW = true`
+Interface Web : commandes OPEN/CLOSE/STOP et journal d’événements
 
-## Structure du code
+Gestion complète du moteur pas-à-pas sur ESP8266
 
-* `PJ_001_ESP8266.ino` — point d’entrée, setup/loop + WebUI
-* `Config.h` — pins, Wi-Fi, vitesses, conversion pas
-* `FSM.h` — machine d’états (BOOT, HOMING_START/RUN, IDLE, OPENING, CLOSING, STOPPING, FAULT)
-* `CounterControl.*` — surcouche moteur (vitesses, limites, état)
-* `StepperKiss.h` — driver pas-à-pas (move/moveTo, accel)
-* `WebUI.*` — interface HTTP (log, commandes)
+Sécurité logicielle (timeout, fin de course matérielle)
 
-## Réseau
+Architecture simple, modulaire et robuste
 
-Dans `Config.h` :
+Matériel
+Composant	Description
+ESP8266	(ex. NodeMCU) – contrôle moteur + WebUI
+Arduino Nano	mesure distance (ultrason) et température
+DM556	driver pas-à-pas
+NEMA 23	moteur principal
+Fin de course bas	contact NO/NC, référence 0
+Bouton physique	commande manuelle locale
+Transmission	pignon-crémaillère (≈ 25.446 cm/tour)
+Câblage (ESP8266)
+Signal	GPIO	Fonction
+STEP	D7 (GPIO13)	impulsions moteur
+DIR	D6 (GPIO12)	direction
+ENA	D5 (GPIO14)	enable actif bas
+Fin de course bas	D1 (GPIO5)	entrée avec pull-up
+Bouton physique	D2 (GPIO4)	entrée avec pull-up
 
-```cpp
-#define WIFI_SSID "..."
-#define WIFI_PWD  "..."
-```
+ENA_ACTIVE_LOW = true
 
-L’ESP8266 sert une **WebUI** (ouvrir/fermer/stop, réglages, logs).
+Structure du projet
+Fichier	Rôle
+PJ_001_ESP8266.ino	boucle principale, WebUI
+Config.h	constantes, pins, Wi-Fi
+FSM.h	machine d’états (BOOT → HOMING → IDLE → etc.)
+CounterControl.h	logique moteur + bouton physique
+StepperKiss.h	gestion moteur pas-à-pas
+WebUI.*	interface web et logs
+Séquence de homing
 
-## Protocole ESP8266 ⇄ Nano (série)
+BOOT
+Lecture distance via Nano ($DST:<cm>). Si valide, conversion en tours → pas.
 
-* Envoyer `'D'` → la Nano répond `"$DST:<cm>\r\n"` (distance en cm)
-* Envoyer `'T'` → `"$TMP:<°C>\r\n"`
-* Le parsing est robuste (préfixe optionnel + extraction numérique).
+HOMING_START
+Si distance connue : position initialisée, moveTo(0).
+Sinon : vitesse réduite + move(-kHomingTravel).
 
-## Paramètres mouvement (extraits)
+HOMING_RUN
+Arrêt dès front actif du fin de course. Timeout 30 s → FAULT.
 
-```cpp
+IDLE
+Attente commande Web ou bouton.
+
+Ouverture/Fermeture
+Commandes relatives selon état. Stop si réappui du bouton.
+
+Logique du bouton physique
+
+Appui court :
+
+En IDLE : alterne OPEN ↔ CLOSE.
+
+En mouvement : STOP immédiat.
+
+Appui long (≥ 5 s) :
+
+En IDLE : lance séquence de homing forcée.
+
+Le traitement du bouton est effectué dans CounterControl::poll() pour garantir une détection réactive même pendant le mouvement.
+
+Communication ESP8266 ⇄ Nano
+Commande	Réponse	Description
+'D'	$DST:<cm>	Distance (cm)
+'T'	$TMP:<°C>	Température
+Timeout	-1.0	Si pas de réponse
+
+Le parsing est robuste et tolère les préfixes parasites.
+
+Paramètres essentiels
 FULL_STEPS_PER_REV = 200
 MICROSTEP_FACTOR   = 10
-kStepsPerRev       = 2000      // 200×10
-VMAX_REV_S_DEFAULT = 1.6
-ACCEL_REV_S2_DEF   = 0.2
-kHomingTravel      = kStepsPerRev * 40L   // marge sûre (≈ 80 000 pas)
+kStepsPerRev       = 2000
+kHomingTravel      = kStepsPerRev * 40L
 kHomingTimeoutMs   = 30000UL
-```
 
-## Conversion distance → pas (pignon/crémaillère)
+Compilation et flash
 
-Périmètre **au pas** du pignon (avec vos cotes) :
-`C ≈ 25.4466 cm/tour`
+IDE : Arduino IDE ou PlatformIO
 
-Équations :
+Carte : ESP8266 (NodeMCU)
 
-```
-turns  = distance_cm / 25.4466
-steps  = round(turns * kStepsPerRev)
-```
+Vitesse série : 115200
 
-## Logique de homing (résumé)
+Flasher séparément :
 
-1. **BOOT**
+ESP8266 → contrôleur moteur
 
-   * Essaye de lire la distance sur la Nano (log informatif).
-2. **HOMING_START**
+Nano → capteur distance/température
 
-   * Re-lit la distance.
-   * Si `distance_cm > 0` :
+Sécurité
 
-     * `steps = round((distance_cm / 25.4466) * kStepsPerRev)`
-     * `setCurrentPosition(steps)` (position connue au-dessus du switch)
-     * `moveTo(0)` (descendre jusqu’au switch)
-   * Sinon (distance invalide) :
+Fin de course matériel obligatoire
 
-     * Réduit `vitesse/accélération`, **move(-kHomingTravel)** (relatif)
-3. **HOMING_RUN**
+Timeout de homing (30 s)
 
-   * Fin si **calibration détectée** (front fin de course) ou absence de mouvement cohérente.
-   * Timeout ⇒ **FAULT**.
-   * En sortie (succès) : restaure `vitesse/accélération` nominales et passe **IDLE**.
+Vitesse réduite si distance invalide
 
-## Commandes
+Arrêt immédiat sur front du fin de course
 
-* **OPEN** : direction +1, `open()`, état **OPENING**
-* **CLOSE** : direction −1, `close()`, état **CLOSING**
-* **STOP** : `stop()`, état **STOPPING**
-
-## Build & flash
-
-* **Arduino IDE** ou **PlatformIO**
-* Board : ESP8266 (NodeMCU)
-* Vitesse série : 115200
-* Compiler puis flasher l’ESP8266 et la Nano (sketch capteurs) séparément.
-
-## Sécurité & garde-fous
-
-* Fin de course **matériel** pour la référence zéro
-* Trajet de homing **généreux** (`kHomingTravel`) + **timeout** 30 s
-* Vitesse/accélération **réduites** si distance capteur invalide
-
-## Dépannage rapide
-
-* Erreur “jump to case label” : encapsuler les déclarations **dans un bloc `{}`** à l’intérieur du `case`.
-* Position inconnue : utiliser `move(Δ)` (relatif), pas `moveTo(x)` (absolu).
-* Vitesses persistantes : rétablir les valeurs nominales après homing dans `HOMING_RUN`.
-
-## Licence
+Dépannage rapide
+Problème	Solution
+“jump to case label”	Entourer la variable dans un bloc {}
+Homing trop lent	Vérifier distance Nano
+Pas d’arrêt sur fin de course	Vérifier logique readLimit() (LOW/HIGH)
+Vitesses incorrectes après homing	Recharger kVmaxSteps / kAccelSteps2
+Licence
 
 Apache 2.0
----
-
-**Astuce description GitHub (<350 caract.)**
-
-> *Comptoir motorisé (ESP8266+Nano) : NEMA23/DM556, pignon-crémaillère. Homing fin de course bas avec estimation distance ultrason. WebUI (open/close/stop, réglages, logs). Moteur via StepperKiss, sécurité timeout.*
