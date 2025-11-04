@@ -82,8 +82,8 @@ bool readButton() {
     bool state = digitalRead(_buttonPin);
     bool pressed = false;
     unsigned long now = millis();
-    // front descendant et délai de 200 ms
-    if (state == LOW && lastState == HIGH && (now - lastPressMs) > 200UL) {
+    // front descendant et délai de 125 ms
+    if (state == LOW && lastState == HIGH && (now - lastPressMs) > 125UL) {
         pressed = true;
         lastPressMs = now;
     }
@@ -98,7 +98,7 @@ bool readButton() {
 private:
   bool readLimit() const {
     int v = digitalRead(_limitPin);
-    return _limitActiveLow ? (v == LOW) : (v == HIGH);
+    return _limitActiveLow ? (v == HIGH) : (v == LOW);
   }
 
   long _stepsPerRev = 200, _openSteps = 2000;
