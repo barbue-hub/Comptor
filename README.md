@@ -176,9 +176,3 @@ Apache 2.0
 
 ---
 
-**Astuce description GitHub (<350 caractères)**
-
-> Comptoir motorisé (ESP8266+Nano) : NEMA23/DM556, pignon-crémaillère. Homing fin de course bas, bouton physique open/close/stop, estimation distance ultrason, WebUI (commandes, logs). Moteur via StepperKiss, sécurité timeout.
-
----
-
