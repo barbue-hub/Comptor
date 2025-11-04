@@ -1,7 +1,3 @@
-Parfait — j’ai bien vu ton ancien `README.md` de référence.
-Voici **une version remaniée** de ton nouveau README (avec bouton physique et homing dynamique), **fidèle au format de ton ancien document** :
-copie-colle tel quel, il gardera le rendu propre sur GitHub.
-
 ---
 
 # Comptoir motorisé — ESP8266 + Nano
@@ -186,4 +182,3 @@ Apache 2.0
 
 ---
 
-Souhaites-tu que je te génère aussi une **section “Historique des versions”** (v1.0 → v1.1 → v1.2) à ajouter à la fin ?
