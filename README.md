@@ -70,13 +70,13 @@ Logique du bouton physique
 
 Appui court :
 
-En IDLE : alterne OPEN ↔ CLOSE.
+En IDLE : alterne OPEN ↔ CLOSE
 
-En mouvement : STOP immédiat.
+En mouvement : STOP immédiat
 
 Appui long (≥ 5 s) :
 
-En IDLE : lance séquence de homing forcée.
+En IDLE : lance séquence de homing forcée
 
 Le traitement du bouton est effectué dans CounterControl::poll() pour garantir une détection réactive même pendant le mouvement.
 
