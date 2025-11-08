@@ -9,8 +9,8 @@
 #define BUTTON_PIN 4  // D2, (pull-up interne)
 
 // -------------------- Paramètres WIFI --------------------
-#define WIFI_SSID "TELUS7704"
-#define WIFI_PWD  "B6hxR6CHJ87n"
+#define WIFI_SSID "...."
+#define WIFI_PWD  "...."
 
 static const int   FULL_STEPS_PER_REV = 200;
 static const int   MICROSTEP_FACTOR   = 10;// devrait le combiner avec FULL_STEPS_PER_REV *****
@@ -39,5 +39,6 @@ const unsigned long kHomingTimeoutMs = 30000UL;
 
 //static const bool KISS_USE_FAST_GPIO = true; // GPOS/GPOC sur ESP8266
 static const uint8_t KISS_MIN_PULSE_US = 6;  // DM556 >=5µs
+
 
 
