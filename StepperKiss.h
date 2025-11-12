@@ -88,9 +88,8 @@ public:
   // provient de CounterControl.h
   void moveTo(long target) {
     _target = target;
-    // Optionnel (seed vitesse) : si à l’arrêt et target != position, amorcer en douceur
     if (fabsf(_speed) < 1e-3f && _target != _position) {
-      int dir = (_target > _position) ? 1 : -1;
+      const int dir = (_target > _position) ? 1 : -1;
       _speed = dir * KISS_MIN_START_SPS;
     }
   }
@@ -137,12 +136,16 @@ public:
     if (dt > KISS_MAX_DT_S) dt = KISS_MAX_DT_S;
 
     // Choisir l'accélération en fonction de la phase et de la direction demandée
+    int desiredDir = 0;
+    if (_target > _position) desiredDir = 1;
+    else if (_target < _position) desiredDir = -1;
+    else if (fabsf(_speed) > 1e-3f) desiredDir = (_speed >= 0.0f) ? 1 : -1;
+
     float stepsToStop = (_speed * _speed) / (2.0f * _accel);
     bool decelPhase = (stepsToStop >= (float)stepsRemaining);
-    int dir = _moveDir;
     float a = decelPhase
                 ? -((_speed >= 0.0f) ? 1.0f : -1.0f) * _accel
-                : dir * _accel;
+                : desiredDir * _accel;
 
     // Intégration vitesse + clamp
     _speed += a * dt;
@@ -162,10 +165,9 @@ public:
     if (_nextStepUs == 0) _nextStepUs = now + _stepIntervalUs;
 
     // Émettre AU PLUS UN pas ici (pas de rafale)
-    if ((long)(now - _nextStepUs) >= 0 && stepsRemaining != 0) {
-      int stepDir = _moveDir; // le sens est dicté par le FSM
-      pulseStep(stepDir);
-      _position += stepDir;
+    if ((long)(now - _nextStepUs) >= 0 && stepsRemaining != 0 && desiredDir != 0) {
+      pulseStep(desiredDir);
+      _position += desiredDir;
 
       // Replanifie le prochain pas à partir de "maintenant"
       _nextStepUs = now + _stepIntervalUs;
@@ -215,19 +217,4 @@ private:
   unsigned long _nextStepUs   = 0;
   unsigned long _stepIntervalUs = 1000;
 
-  // Sens de déplacement actuel : +1 ouverture, -1 fermeture. Défini par le FSM via setDirection().
-  int _moveDir = 0;
-
-public:
-  /**
-   * Configure la direction pour le prochain mouvement.
-   * Le paramètre dir devrait valoir 1 pour l’ouverture et -1 pour la fermeture.
-   * Cette valeur est utilisée par run() pour déterminer le sens des pas.
-   */
-  void setDirection(int dir) {
-    // normalise à ±1
-    if (dir > 0) _moveDir = 1;
-    else if (dir < 0) _moveDir = -1;
-    else _moveDir = 0;
-  }
 };
