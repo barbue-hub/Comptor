@@ -1,112 +1,160 @@
-// Classe CounterControl : gère un moteur pas-à-pas avec butée de fin de course.
-// - Init : configure pins, vitesses, accélération et nombre de pas pour ouverture.
-// - Commandes : open(), close(), stop().
-// - poll() : surveille le fin de course, stoppe/calibre si activé, exécute moteur.
-// - Accès : position en pas/tours, état du mouvement, dernier calibrage.
-
 #pragma once
+
 #include <Arduino.h>
+
+#include "Config.h"
 #include "StepperKiss.h"
 
 class CounterControl {
 public:
+  enum class ButtonEvent : uint8_t { None, ShortPress, LongPress };
+
   void begin(uint8_t stepPin, uint8_t dirPin, int8_t enaPin, bool enaActiveLow,
              uint8_t limitPin, bool limitActiveLow,
-             long stepsPerRev, float openTurns) {
+             int8_t buttonPin, bool buttonActiveLow,
+             long stepsPerRev, const Config::MotionConfig& motion,
+             unsigned long debounceMs, unsigned long longPressMs) {
     _stepsPerRev = stepsPerRev;
-    _openSteps = (long)(openTurns * (float)stepsPerRev + 0.5f);
     _limitPin = limitPin;
     _limitActiveLow = limitActiveLow;
-    _buttonPin = BUTTON_PIN;
+    _buttonPin = buttonPin;
+    _buttonActiveLow = buttonActiveLow;
+    _debounceMs = debounceMs;
+    _longPressMs = longPressMs;
 
     pinMode(_limitPin, INPUT_PULLUP);
-    pinMode(_buttonPin, INPUT_PULLUP);
-    motor.begin(stepPin, dirPin, enaPin, enaActiveLow);
-    motor.setMaxSpeed(_vMaxSteps);
-    motor.setAcceleration(_accelSteps2);
-    motor.enable(true);
+    if (_buttonPin >= 0) {
+      pinMode(_buttonPin, _buttonActiveLow ? INPUT_PULLUP : INPUT);
+    }
+
+    _motor.begin(stepPin, dirPin, enaPin, enaActiveLow);
+    _motor.enable(true);
+    applyMotion(motion);
+  }
+
+  void applyMotion(const Config::MotionConfig& motion) {
+    setOpenTurns(motion.openTurns);
+    setMaxSpeedSteps(motion.maxStepsPerSecond);
+    setAccelerationSteps2(motion.accelStepsPerSecond2);
   }
 
   void setOpenTurns(float turns) {
-    _openSteps = (long)(turns * (float)_stepsPerRev + 0.5f);
+    if (turns < 0.0f) turns = 0.0f;
+    _openSteps = static_cast<long>(turns * static_cast<float>(_stepsPerRev) + 0.5f);
   }
+
   void setMaxSpeedSteps(float stepsPerSec) {
-    _vMaxSteps = stepsPerSec;
-    motor.setMaxSpeed(_vMaxSteps);
+    _motor.setMaxSpeed(stepsPerSec);
   }
-  void setAccelerationSteps2(float s2) {
-    _accelSteps2 = s2;
-    motor.setAcceleration(_accelSteps2);
+
+  void setAccelerationSteps2(float stepsPerSec2) {
+    _motor.setAcceleration(stepsPerSec2);
   }
 
   void open() {
-    motor.moveTo(_openSteps);
-  }
-  void close() {
-    motor.moveTo(0);
-  }
-  void stop() {
-    motor.stop();
+    _motor.enable(true);
+    _motor.moveTo(_openSteps);
   }
 
-  void poll() {
-    bool limitActive = readLimit();
+  void close() {
+    _motor.enable(true);
+    _motor.moveTo(0);
+  }
+
+  void stop() {
+    _motor.stop();
+  }
+
+  void moveRelative(long deltaSteps) {
+    _motor.enable(true);
+    _motor.move(deltaSteps);
+  }
+
+  void moveToSteps(long steps) {
+    _motor.enable(true);
+    _motor.moveTo(steps);
+  }
+
+  void seedPosition(long steps) {
+    _motor.setCurrentPosition(steps);
+  }
+
+  ButtonEvent poll() {
+    const bool limitActive = readLimit();
     if (limitActive && !_limitLatched) {
       _limitLatched = true;
-      motor.emergencyStop();
-      motor.setCurrentPosition(0);
-      motor.moveTo(0);
+      _motor.emergencyStop();
+      _motor.setCurrentPosition(0);
+      _motor.moveTo(0);
       _lastCalibMs = millis();
     } else if (!limitActive) {
       _limitLatched = false;
     }
-    motor.run();
+
+    _motor.run();
+    return updateButton();
   }
 
-  long positionSteps() const {
-    return motor.currentPosition();
-  }
+  long positionSteps() const { return _motor.currentPosition(); }
+
   float positionTurns() const {
-    return motor.currentPosition() / (float)_stepsPerRev;
+    return _motor.currentPosition() / static_cast<float>(_stepsPerRev);
   }
-  unsigned long lastCalibMs() const {
-    return _lastCalibMs;
-  }
-  bool isMoving() const {
-    return motor.targetPosition() != motor.currentPosition();
-  }
-// dans CounterControl.h
-bool readButton() {
-    static bool lastState = HIGH;
-    static unsigned long lastPressMs = 0;
-    bool state = digitalRead(_buttonPin);
-    bool pressed = false;
-    unsigned long now = millis();
-    // front descendant et délai de 125 ms
-    if (state == LOW && lastState == HIGH && (now - lastPressMs) > 125UL) {
-        pressed = true;
-        lastPressMs = now;
-    }
-    lastState = state;
-    return pressed;
-}
 
+  bool isMoving() const { return _motor.targetPosition() != _motor.currentPosition(); }
 
+  unsigned long lastCalibrationMs() const { return _lastCalibMs; }
 
-  StepperKiss motor;
+  long stepsPerRevolution() const { return _stepsPerRev; }
 
 private:
   bool readLimit() const {
-    int v = digitalRead(_limitPin);
+    const int v = digitalRead(_limitPin);
     return _limitActiveLow ? (v == HIGH) : (v == LOW);
   }
 
-  long _stepsPerRev = 200, _openSteps = 2000;
-  uint8_t _limitPin = 255;
-  uint8_t _buttonPin = 255;
-  bool _limitActiveLow = true;
+  ButtonEvent updateButton() {
+    if (_buttonPin < 0) return ButtonEvent::None;
 
-  float _vMaxSteps = 1600.0f, _accelSteps2 = 2000.0f;
+    const unsigned long now = millis();
+    const bool pressed = digitalRead(_buttonPin) == (_buttonActiveLow ? LOW : HIGH);
+
+    if (pressed) {
+      if (!_buttonWasPressed) {
+        _buttonWasPressed = true;
+        _buttonPressMs = now;
+        _buttonLongSent = false;
+      } else if (!_buttonLongSent && (now - _buttonPressMs) >= _longPressMs) {
+        _buttonLongSent = true;
+        return ButtonEvent::LongPress;
+      }
+    } else if (_buttonWasPressed) {
+      ButtonEvent event = ButtonEvent::None;
+      if (!_buttonLongSent && (now - _buttonPressMs) >= _debounceMs) {
+        event = ButtonEvent::ShortPress;
+      }
+      _buttonWasPressed = false;
+      _buttonLongSent = false;
+      return event;
+    }
+
+    return ButtonEvent::None;
+  }
+
+  StepperKiss _motor;
+
+  long _stepsPerRev = Config::stepsPerRevolution();
+  long _openSteps = 0;
+  uint8_t _limitPin = 255;
+  int8_t _buttonPin = -1;
+  bool _limitActiveLow = true;
+  bool _buttonActiveLow = true;
   bool _limitLatched = false;
   unsigned long _lastCalibMs = 0;
+
+  unsigned long _debounceMs = 50;
+  unsigned long _longPressMs = 5000;
+  bool _buttonWasPressed = false;
+  bool _buttonLongSent = false;
+  unsigned long _buttonPressMs = 0;
 };

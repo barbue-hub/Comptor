@@ -37,9 +37,9 @@ Moteur géré par **StepperKiss** (accélération/décélération lissées).
 
 ## Structure du code
 
-* `PJ_001_ESP8266.ino` — point d’entrée, setup/loop + WebUI
-* `Config.h` — pins, Wi-Fi, vitesses, conversion pas
-* `FSM.h` — machine d’états (BOOT, HOMING_START/RUN, IDLE, OPENING, CLOSING, STOPPING, FAULT)
+* `PJ_001_ESP8266.ino` — point d’entrée ultra-minimal (setup/loop)
+* `ComptorApp.*` — logique centrale (FSM, homing, file de commandes, UI)
+* `Config.h` — pins, Wi-Fi, vitesses, conversion pas (constantes `constexpr`)
 * `CounterControl.*` — surcouche moteur (vitesses, limites, bouton physique)
 * `StepperKiss.h` — driver pas-à-pas (move/moveTo, accel)
 * `WebUI.*` — interface HTTP (log, commandes)
