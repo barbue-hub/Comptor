@@ -20,7 +20,7 @@ struct WebUI_Status {
 };
 
 namespace WebUI {
-  void setCallbacks(VoidCb onOpen, VoidCb onClose, VoidCb onStop,
+  void setCallbacks(VoidCb onOpen, VoidCb onClose, VoidCb onStop, VoidCb onMeasure,
                     SetFloatCb onSetTurns, SetFloatCb onSetSpeed,
                     SetFloatCb onSetAccel, GetStatusCb getStatus);
   void begin(const char* ssid, const char* wifiPwd);

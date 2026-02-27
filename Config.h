@@ -1,83 +1,44 @@
 #pragma once
+#define KISS_USE_FAST_GPIO 1
 
-#include <Arduino.h>
+// ---- Pins ----
+#define STEP_PIN   13   // D7
+#define DIR_PIN    12   // D6
+#define ENA_PIN    14   // D5
+#define LIMIT_BOTTOM 5  // D1 (pull-up interne)
+#define BUTTON_PIN 4  // D2, (pull-up interne)
 
-#ifndef WIFI_SSID
-#define WIFI_SSID "...."
-#endif
+// -------------------- Paramètres WIFI --------------------
+#define WIFI_SSID "TELUS0382"
+#define WIFI_PWD  "gmg7n3qqzh"
 
-#ifndef WIFI_PWD
-#define WIFI_PWD "...."
-#endif
+static const int   FULL_STEPS_PER_REV = 200;
+static const int   MICROSTEP_FACTOR   = 10;// devrait le combiner avec FULL_STEPS_PER_REV *****
+static const bool  ENA_ACTIVE_LOW     = true;
 
-namespace Config {
+//-----------------------------------------
 
-// -------------------- Brochage --------------------
-inline constexpr uint8_t kStepPin        = 13;  // D7
-inline constexpr uint8_t kDirPin         = 12;  // D6
-inline constexpr int8_t  kEnablePin      = 14;  // D5
-inline constexpr bool    kEnableActiveLow = true;
+static const float OPEN_TURNS_DEFAULT = 3.6f; // Nombre de tgour à l'ouverture
+static const float VMAX_REV_S_DEFAULT = 0.8f;
+static const float ACCEL_REV_S2_DEF   = 0.00002f; //semble ici pour le 1000000 d'acceleration sur le webUI
 
-inline constexpr uint8_t kLimitBottomPin = 5;   // D1 (pull-up interne)
-inline constexpr bool    kLimitActiveLow = true;
+// Conversion tours/s -> steps/s, etc.
+static const long  kStepsPerRev   = (long)(FULL_STEPS_PER_REV * MICROSTEP_FACTOR);
+static float       kOpenTurns     = OPEN_TURNS_DEFAULT;
+static float       kVmaxSteps     = VMAX_REV_S_DEFAULT   * kStepsPerRev;
+static float       kAccelSteps2   = ACCEL_REV_S2_DEF     * kStepsPerRev * kStepsPerRev;
 
-inline constexpr int8_t  kButtonPin      = 4;   // D2 (pull-up interne)
-inline constexpr bool    kButtonActiveLow = true;
 
-// -------------------- Wi-Fi --------------------
-inline constexpr char kWifiSsid[]     = WIFI_SSID;
-inline constexpr char kWifiPassword[] = WIFI_PWD;
-
-// -------------------- Paramètres moteurs --------------------
-inline constexpr int   kFullStepsPerRev = 200;
-inline constexpr int   kMicrostepFactor = 10;
-
-inline constexpr long stepsPerRevolution() {
-  return static_cast<long>(kFullStepsPerRev) * static_cast<long>(kMicrostepFactor);
-}
-
-struct MotionConfig {
-  float openTurns;
-  float maxStepsPerSecond;
-  float accelStepsPerSecond2;
-};
-
-inline constexpr MotionConfig defaultMotion() {
-  return MotionConfig{
-      10.0f,
-      1.6f * static_cast<float>(stepsPerRevolution()),
-      0.0002f * static_cast<float>(stepsPerRevolution()) * static_cast<float>(stepsPerRevolution())};
-}
-
-inline constexpr float kGearCmPerTurn = 25.4466f;
-
-inline long cmToSteps(float distanceCm) {
-  return static_cast<long>((distanceCm / kGearCmPerTurn) * static_cast<float>(stepsPerRevolution()) + 0.5f);
-}
-
-// -------------------- Homing --------------------
-inline constexpr long kHomingTravelSteps = stepsPerRevolution() * 40L;
-inline constexpr unsigned long kHomingTimeoutMs = 30000UL;
-inline constexpr float kHomingSpeedFactor = 0.25f;
-inline constexpr float kHomingAccelFactor = 0.25f;
-
-// -------------------- Divers --------------------
-inline constexpr unsigned long kNanoTimeoutMs = 2000UL;
-inline constexpr unsigned long kTemperaturePollMs = 5000UL;
-inline constexpr unsigned long kButtonDebounceMs = 125UL;
-inline constexpr unsigned long kButtonLongPressMs = 5000UL;
+// Homing: déplacement négatif "sûr" jusqu’au fin de course bas (D1, PULLUP)
+// Valeurs pour le homing : déplacement sûr et délai maximum
+const long  kHomingTravel  = kStepsPerRev * 40L;   // marge généreuse
+// Utiliser une notation entière simple (30000) car certains compilateurs Arduino
+// ne supportent pas les séparateurs de milliers avec des apostrophes.
+const unsigned long kHomingTimeoutMs = 30000UL;
 
 // ---- StepperKiss options anti-stutter ----
-inline constexpr uint8_t KISS_MIN_PULSE_US = 6;  // DM556 >=5µs
-inline constexpr bool    KISS_USE_FAST_GPIO = true;
 
-}  // namespace Config
+//static const bool KISS_USE_FAST_GPIO = true; // GPOS/GPOC sur ESP8266
+static const uint8_t KISS_MIN_PULSE_US = 6;  // DM556 >=5µs
 
-#ifndef KISS_USE_FAST_GPIO
-#define KISS_USE_FAST_GPIO Config::KISS_USE_FAST_GPIO
-#endif
-
-#ifndef KISS_MIN_PULSE_US
-#define KISS_MIN_PULSE_US Config::KISS_MIN_PULSE_US
-#endif
 

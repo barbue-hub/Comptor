@@ -5,7 +5,7 @@ namespace {
   ESP8266WebServer server(80);
   static bool isAuthenticated = true;
   static const char* kAuthPwd = "69420";
-  static VoidCb cbOpen=nullptr, cbClose=nullptr, cbStop=nullptr;
+  static VoidCb cbOpen=nullptr, cbClose=nullptr, cbStop=nullptr, cbMeasure = nullptr;
   static SetFloatCb cbSetTurns=nullptr, cbSetSpeed=nullptr, cbSetAccel=nullptr;
   static GetStatusCb cbGetStatus=nullptr;
 
@@ -40,6 +40,7 @@ namespace {
     page += "<button onclick=\"fetch('/open')\">Ouvrir</button> ";
     page += "<button onclick=\"fetch('/close')\">Fermer</button> ";
     page += "<button onclick=\"fetch('/stop')\">Stop</button> ";
+    page += "<button onclick=\"fetch('/measure')\">Measure</button> ";
     page += "<button type='button' id='btnRefresh'>Refresh</button>";
     page += "<p>Cycles complétés : <span id='cycles'>" + String(st.cycles) + "</span></p>";
     page += "<h2>Informations système</h2>";
@@ -84,6 +85,7 @@ namespace {
   void handleOpen()  { if (!isAuthenticated) { server.send(403,"text/plain","Non autorisé"); return; } if (cbOpen)  cbOpen();  pushLog("[CMD] Ouverture"); server.send(200,"text/plain","OPEN"); }
   void handleClose() { if (!isAuthenticated) { server.send(403,"text/plain","Non autorisé"); return; } if (cbClose) cbClose(); pushLog("[CMD] Fermeture");  server.send(200,"text/plain","CLOSE"); }
   void handleStop()  { if (!isAuthenticated) { server.send(403,"text/plain","Non autorisé"); return; } if (cbStop)  cbStop();  pushLog("[ESTOP] Commande d'arrêt reçue"); server.send(200,"text/plain","STOP"); }
+  void handleMeasure()  { if (!isAuthenticated) { server.send(403,"text/plain","Non autorisé"); return; } if (cbMeasure)  cbMeasure();  pushLog("[CMD] Commande de mesure reçue"); server.send(200,"text/plain","MEASURE"); }
 
   void handleSet() {
     if (!isAuthenticated) { server.send(403,"text/plain","Non autorisé"); return; }
@@ -118,10 +120,10 @@ namespace {
   }
 }
 
-void WebUI::setCallbacks(VoidCb onOpen, VoidCb onClose, VoidCb onStop,
+void WebUI::setCallbacks(VoidCb onOpen, VoidCb onClose, VoidCb onStop, VoidCb onMeasure,
                          SetFloatCb onSetTurns, SetFloatCb onSetSpeed,
                          SetFloatCb onSetAccel, GetStatusCb getStatus) {
-  cbOpen = onOpen; cbClose = onClose; cbStop = onStop;
+  cbOpen = onOpen; cbClose = onClose; cbStop = onStop; cbMeasure = onMeasure;
   cbSetTurns = onSetTurns; cbSetSpeed = onSetSpeed; cbSetAccel = onSetAccel;
   cbGetStatus = getStatus;
 }
@@ -139,6 +141,7 @@ void WebUI::begin(const char* ssid, const char* wifiPwd) {
   server.on("/open", handleOpen);
   server.on("/close", handleClose);
   server.on("/stop", handleStop);
+  server.on("/measure", handleMeasure);
   server.on("/set", handleSet);
   server.on("/logs", handleLogs);
   server.on("/status", handleStatus);
