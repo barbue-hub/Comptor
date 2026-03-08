@@ -35,9 +35,9 @@ struct MotionConfig {
 
 inline constexpr MotionConfig defaultMotion() {
   return MotionConfig{
-      10.0f,
-      1.6f * static_cast<float>(stepsPerRevolution()),
-      0.0002f * static_cast<float>(stepsPerRevolution()) * static_cast<float>(stepsPerRevolution())};
+      100000000.0f,//Open turns 3.6 de base
+      10.6f * static_cast<float>(stepsPerRevolution()),//Speed 1.6 de base
+      0.0002f * static_cast<float>(stepsPerRevolution()) * static_cast<float>(stepsPerRevolution())};//Acceleration
 }
 
 inline constexpr float kGearCmPerTurn = 25.4466f;
@@ -53,7 +53,7 @@ inline constexpr float kHomingSpeedFactor = 0.25f;
 inline constexpr float kHomingAccelFactor = 0.25f;
 
 // -------------------- Divers --------------------
-inline constexpr unsigned long kTemperaturePollMs = 60000UL;
+inline constexpr unsigned long kTemperaturePollMs = 30000UL;
 inline constexpr unsigned long kButtonDebounceMs = 50UL;
 inline constexpr unsigned long kButtonLongPressMs = 5000UL;
 
