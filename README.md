@@ -117,3 +117,110 @@ Conversion distance → pas :
 
 ```cpp
 steps = (distance_cm / 25.4466) * stepsPerRevolution()
+```
+
+---
+
+## Logique de fonctionnement
+
+### Démarrage
+Au boot :
+
+1. le Pico initialise les capteurs,
+2. lit une distance initiale,
+3. initialise le contrôle moteur,
+4. passe en état `Boot`,
+5. lance immédiatement un **homing**.
+
+### Homing
+Le homing :
+
+- réduit vitesse et accélération,
+- effectue un mouvement relatif vers le bas,
+- attend la calibration par le fin de course,
+- passe en `Fault` si le timeout est dépassé.
+
+### Bouton physique
+- **Appui court**
+  - si immobile : alterne ouverture / fermeture selon la position
+  - si en mouvement : demande un arrêt contrôlé
+  - si déjà en arrêt contrôlé : prépare une inversion après arrêt complet
+
+- **Appui long**
+  - relance le homing
+
+### Température
+La température est relue périodiquement **uniquement quand le moteur est immobile**.
+
+---
+
+## Dépendances
+
+Bibliothèques utilisées :
+
+- `Arduino`
+- `OneWire`
+- `DallasTemperature`
+
+---
+
+## Build / flash
+
+Le projet est prévu pour un environnement Arduino compatible Pico.
+
+### En pratique
+- Ouvrir `ComptorPico.ino`
+- Sélectionner une carte **Raspberry Pi Pico**
+- Installer les bibliothèques :
+  - `OneWire`
+  - `DallasTemperature`
+- Compiler et flasher
+
+### Moniteur série
+Configurer le moniteur série à :
+
+```txt
+115200 bauds
+```
+
+---
+
+## Logs série utiles
+
+Exemples de messages émis :
+
+- `[ComptorApp] Démarrage...`
+- `[BOOT] Distance initiale: ... cm`
+- `[FSM] Boot – lancement homing`
+- `[FSM] HOMING start`
+- `[FSM] Homing terminé → Idle`
+- `[FSM] Homing timeout → Fault`
+- `[FSM] Ouverture terminée`
+- `[FSM] Fermeture terminée`
+- `[FSM] Cycle complet n°...`
+- `[TEMP] ... °C`
+
+---
+
+## Sécurité / garde-fous
+
+- homing au démarrage,
+- référence bas via fin de course,
+- timeout sur homing,
+- arrêt contrôlé en mouvement,
+- état `Fault` si homing invalide,
+- paramètres moteur centralisés.
+
+---
+
+## Notes
+
+- Cette branche **remplace l’ancienne architecture ESP8266 + Nano + WebUI** par une version **plus simple et autonome** sur Pico.
+- `StepperKiss` reste utilisé comme base de pilotage moteur.
+- Le projet est structuré pour être facile à ajuster côté brochage, motion et logique de contrôle.
+
+---
+
+## Licence
+
+Apache 2.0

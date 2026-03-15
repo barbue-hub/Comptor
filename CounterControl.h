@@ -35,6 +35,9 @@ public:
     _motor.enable(true);
     applyMotion(motion);
   }
+  void enableMotor(bool enable) {
+    _motor.enable(enable);
+  }
 
   void applyMotion(const Config::MotionConfig& motion) {
     setOpenTurns(motion.openTurns);
@@ -55,16 +58,6 @@ public:
     _motor.setAcceleration(stepsPerSec2);
   }
 
-  void open() {
-    _motor.enable(true);
-    _motor.moveTo(_openSteps);
-  }
-
-  void close() {
-    _motor.enable(true);
-    _motor.moveTo(0);
-  }
-
   void stop() {
     _motor.stop();
   }
@@ -79,16 +72,17 @@ public:
     _motor.moveTo(steps);
   }
 
-  void seedPosition(long steps) {
-    _motor.setCurrentPosition(steps);
+  void emergencyStop() {
+    _motor.emergencyStop();
+    _motor.moveTo(_motor.currentPosition());
   }
 
   ButtonEvent poll() {
     const bool limitActive = readLimit();
     if (limitActive && !_limitLatched) {
-      i++;
-      Serial.println("CLICK EMERGENCY STOP");
-      Serial.print(i);
+      Serial.println("Limit SW fermée");
+      //i++;
+      //Serial.print(i);
       _limitLatched = true;
       _motor.emergencyStop();
       _motor.setCurrentPosition(0);
@@ -106,20 +100,12 @@ public:
     return _motor.currentPosition();
   }
 
-  float positionTurns() const {
-    return _motor.currentPosition() / static_cast<float>(_stepsPerRev);
-  }
-
   bool isMoving() const {
     return _motor.targetPosition() != _motor.currentPosition();
   }
 
   unsigned long lastCalibrationMs() const {
     return _lastCalibMs;
-  }
-
-  long stepsPerRevolution() const {
-    return _stepsPerRev;
   }
 
 private:

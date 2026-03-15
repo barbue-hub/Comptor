@@ -51,7 +51,7 @@ public:
   StepperKiss() {}
 
   // initialisation.
-  void begin(uint8_t stepPin, uint8_t dirPin, int8_t enaPin = -1, bool enaActiveLow = true) {
+  void begin(uint8_t stepPin, uint8_t dirPin, int8_t enaPin = 1, bool enaActiveLow = true) {
     _stepPin = stepPin;
     _dirPin  = dirPin;
     _enaPin  = enaPin;
@@ -105,7 +105,7 @@ public:
   void stop() {
     // place une cible pour s'arrêter en douceur
     int dir = (_speed >= 0.0f) ? 1 : -1;
-    long stepsToStop = (long)((_speed * _speed) / (2.0f * _accel) + 0.5f);
+    long stepsToStop = static_cast<long>((_speed * _speed) / (2.0f * _accel) + 0.5f);
     if (stepsToStop < 1) stepsToStop = 1;
     _target = _position + dir * stepsToStop;
   }
@@ -144,7 +144,7 @@ public:
     else if (fabsf(_speed) > 1e-3f) desiredDir = (_speed >= 0.0f) ? 1 : -1;
 
     float stepsToStop = (_speed * _speed) / (2.0f * _accel);
-    bool decelPhase = (stepsToStop >= (float)stepsRemaining);
+    bool decelPhase = (stepsToStop >= static_cast<float>(stepsRemaining));
     float a = decelPhase
                 ? -((_speed >= 0.0f) ? 1.0f : -1.0f) * _accel
                 : desiredDir * _accel;
@@ -158,7 +158,7 @@ public:
     float sps = fabsf(_speed);
     if (sps < KISS_MIN_START_SPS) sps = KISS_MIN_START_SPS;  // amorçage doux
 
-    unsigned long stepInterval = (unsigned long)(1000000.0f / sps);
+    unsigned long stepInterval = static_cast<unsigned long>(1000000.0f / sps);
     if (stepInterval > KISS_MAX_STEP_INTERVAL_US)
       stepInterval = KISS_MAX_STEP_INTERVAL_US;
     _stepIntervalUs = stepInterval;
@@ -167,7 +167,7 @@ public:
     if (_nextStepUs == 0) _nextStepUs = now + _stepIntervalUs;
 
     // Émettre AU PLUS UN pas ici (pas de rafale)
-    if ((long)(now - _nextStepUs) >= 0 && stepsRemaining != 0 && desiredDir != 0) {
+    if (static_cast<long>(now - _nextStepUs) >= 0 && stepsRemaining != 0 && desiredDir != 0) {
       pulseStep(desiredDir);
       _position += desiredDir;
 

@@ -12,18 +12,21 @@ inline constexpr uint8_t kDirPin         = 7;  // GPIO7 → DIR input of the dri
 inline constexpr int8_t  kEnablePin      = 6;  // GPIO6 → ENA input of the driver
 inline constexpr bool    kEnableActiveLow = true;
 
-inline constexpr uint8_t kLimitBottomPin = 21;   // GPIO9 → limit switch at bottom
+inline constexpr uint8_t kLimitBottomPin = 21;   // GPIO21 → limit switch at bottom
 inline constexpr bool    kLimitActiveLow = false;
 
-inline constexpr int8_t  kButtonPin      = 22;  // GPIO10 → local push‑button
+inline constexpr int8_t  kButtonPin      = 22;  // GPIO22 → local push-button
 inline constexpr bool    kButtonActiveLow = false;
 
 // -------------------- Paramètres moteurs --------------------
-inline constexpr int   kFullStepsPerRev = 200;
-inline constexpr int   kMicrostepFactor = 10;
+inline constexpr bool  kEnableIDLE = true;
+inline constexpr int   kDipSwitch = 8000; 
+inline constexpr float kOpenTurns = 300000000.0f; // tour 3,6 défaut
+inline constexpr float kSpeed = 10.6f; // tour/sec 1.6 defaut
+inline constexpr float kAcceleration = 0.02f;// valeur à determiner expérimentalement 0.00002 défaut
 
 inline constexpr long stepsPerRevolution() {
-  return static_cast<long>(kFullStepsPerRev) * static_cast<long>(kMicrostepFactor);
+  return static_cast<long>(kDipSwitch);
 }
 
 // Motion parameters: number of turns to fully open and default speed/acceleration.
@@ -35,25 +38,32 @@ struct MotionConfig {
 
 inline constexpr MotionConfig defaultMotion() {
   return MotionConfig{
-      100000000.0f,//Open turns 3.6 de base
-      10.6f * static_cast<float>(stepsPerRevolution()),//Speed 1.6 de base
-      0.0002f * static_cast<float>(stepsPerRevolution()) * static_cast<float>(stepsPerRevolution())};//Acceleration
+      kOpenTurns,//Open turns 3.6 de base
+      kSpeed * static_cast<float>(stepsPerRevolution()),//Speed 1.6 de base
+      kAcceleration * static_cast<float>(stepsPerRevolution()) * static_cast<float>(stepsPerRevolution())};//Acceleration
 }
 
 inline constexpr float kGearCmPerTurn = 25.4466f;
+
+// -------------------- Capteurs DS18B20 --------------------
+inline constexpr uint8_t kOneWireBus1Pin = 28;  // GPIO28 → DS18B20 bus 1
+inline constexpr uint8_t kOneWireBus2Pin = 2;   // GPIO2 → DS18B20 bus 2
+
+// -------------------- Seuils --------------------
+inline constexpr float kFaultTemperatureC = 40.0f;
 
 inline long cmToSteps(float distanceCm) {
   return static_cast<long>((distanceCm / kGearCmPerTurn) * static_cast<float>(stepsPerRevolution()) + 0.5f);
 }
 
 // -------------------- Homing --------------------
-inline constexpr long kHomingTravelSteps = stepsPerRevolution() * 40L;
-inline constexpr unsigned long kHomingTimeoutMs = 30000UL;
+inline constexpr long kHomingTravelSteps = stepsPerRevolution() * 20L;
+inline constexpr unsigned long kHomingTimeoutMs = 20000UL;
 inline constexpr float kHomingSpeedFactor = 0.25f;
 inline constexpr float kHomingAccelFactor = 0.25f;
 
 // -------------------- Divers --------------------
-inline constexpr unsigned long kTemperaturePollMs = 30000UL;
+inline constexpr unsigned long kTemperaturePollMs = 10000UL;
 inline constexpr unsigned long kButtonDebounceMs = 50UL;
 inline constexpr unsigned long kButtonLongPressMs = 5000UL;
 
