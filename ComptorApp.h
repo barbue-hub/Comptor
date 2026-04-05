@@ -20,8 +20,12 @@ public:
   float latestTemp() const;
   long positionSteps() const;
   bool isMoving() const;
+  float openTurns() const;
+  float maxSpeedTurnsPerSecond() const;
+  float accelTurnsPerSecond2() const;
   void requestOpen();
   void requestClose();
+  void updateMotionConfigTurns(float openTurns, float speedTurnsPerSecond, float accelTurnsPerSecond2);
 
 private:
   enum class State : uint8_t { Boot, HomingRun, Idle, Opening, Closing, Stopping, Fault };

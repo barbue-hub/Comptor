@@ -21,9 +21,9 @@ inline constexpr bool    kButtonActiveLow = false;
 // -------------------- Paramètres moteurs --------------------
 inline constexpr bool  kEnableIDLE = true;
 inline constexpr int   kDipSwitch = 8000; 
-inline constexpr float kOpenTurns = 300000000.0f; // tour 3,6 défaut
-inline constexpr float kSpeed = 10.6f; // tour/sec 1.6 defaut
-inline constexpr float kAcceleration = 0.02f;// valeur à determiner expérimentalement 0.00002 défaut
+inline constexpr float kOpenTurns = 3.6f; // tour 3,6 défaut
+inline constexpr float kSpeed = 1.6f; // tour/sec 1.6 defaut
+inline constexpr float kAcceleration = 0.0002f;// valeur à determiner expérimentalement 0.00002 défaut
 
 inline constexpr long stepsPerRevolution() {
   return static_cast<long>(kDipSwitch);

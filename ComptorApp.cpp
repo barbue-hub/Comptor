@@ -327,3 +327,58 @@ void ComptorApp::pollTemperature() {
     tempConversionInProgress = false;
   }
 }
+float ComptorApp::latestTemp() const {
+  return latestTempC_;
+}
+
+long ComptorApp::positionSteps() const {
+  return control_.positionSteps();
+}
+
+bool ComptorApp::isMoving() const {
+  return control_.isMoving();
+}
+
+float ComptorApp::openTurns() const {
+  return targetMotion_.openTurns;
+}
+
+float ComptorApp::maxSpeedTurnsPerSecond() const {
+  return targetMotion_.maxStepsPerSecond / static_cast<float>(Config::stepsPerRevolution());
+}
+
+float ComptorApp::accelTurnsPerSecond2() const {
+  return targetMotion_.accelStepsPerSecond2 / static_cast<float>(Config::stepsPerRevolution());
+}
+
+void ComptorApp::requestOpen() {
+  pendingCommand_ = Command::Open;
+}
+
+void ComptorApp::requestClose() {
+  pendingCommand_ = Command::Close;
+}
+
+void ComptorApp::updateMotionConfigTurns(float openTurns, float speedTurnsPerSecond, float accelTurnsPerSecond2) {
+  if (openTurns < 0.0f) openTurns = 0.0f;
+  if (speedTurnsPerSecond < 0.01f) speedTurnsPerSecond = 0.01f;
+  if (accelTurnsPerSecond2 < 0.01f) accelTurnsPerSecond2 = 0.01f;
+
+  targetMotion_.openTurns = openTurns;
+  targetMotion_.maxStepsPerSecond = speedTurnsPerSecond * static_cast<float>(Config::stepsPerRevolution());
+  targetMotion_.accelStepsPerSecond2 = accelTurnsPerSecond2 * static_cast<float>(Config::stepsPerRevolution());
+
+  control_.setOpenTurns(targetMotion_.openTurns);
+
+  if (state_ == State::Idle || state_ == State::Fault) {
+    control_.setMaxSpeedSteps(targetMotion_.maxStepsPerSecond);
+    control_.setAccelerationSteps2(targetMotion_.accelStepsPerSecond2);
+  }
+
+  Serial.print("[CFG] openTurns=");
+  Serial.print(targetMotion_.openTurns, 3);
+  Serial.print(" speedTurns=");
+  Serial.print(maxSpeedTurnsPerSecond(), 3);
+  Serial.print(" accelTurns=");
+  Serial.println(accelTurnsPerSecond2, 3);
+}
