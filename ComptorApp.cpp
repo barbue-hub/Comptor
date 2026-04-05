@@ -10,6 +10,12 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+static float clampf(float v, float vmin, float vmax) {
+  if (v < vmin) return vmin;
+  if (v > vmax) return vmax;
+  return v;
+}
+
 // Temps de conversion DS18B20 selon résolution configurée.
 // 9 bits ≈ 93.75 ms, on prend une petite marge.
 static constexpr unsigned long TEMP_CONVERSION_MS = 100;
@@ -360,9 +366,9 @@ void ComptorApp::requestClose() {
 }
 
 void ComptorApp::updateMotionConfigTurns(float openTurns, float speedTurnsPerSecond, float accelTurnsPerSecond2) {
-  if (openTurns < 0.0f) openTurns = 0.0f;
-  if (speedTurnsPerSecond < 0.01f) speedTurnsPerSecond = 0.01f;
-  if (accelTurnsPerSecond2 < 0.01f) accelTurnsPerSecond2 = 0.01f;
+  openTurns = clampf(openTurns, 0.1f, 4.0f);
+  speedTurnsPerSecond = clampf(speedTurnsPerSecond, 0.05f, 2.0f);
+  accelTurnsPerSecond2 = clampf(accelTurnsPerSecond2, 0.05f, 0.5f);
 
   targetMotion_.openTurns = openTurns;
   targetMotion_.maxStepsPerSecond = speedTurnsPerSecond * static_cast<float>(Config::stepsPerRevolution());
