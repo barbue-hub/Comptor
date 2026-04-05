@@ -14,10 +14,14 @@
 
 class ComptorApp {
 public:
-  // Initialise le système : ports série, capteurs et moteur.
   void begin();
-  // Boucle principale à appeler dans loop().
   void loop();
+
+  float latestTemp() const;
+  long positionSteps() const;
+  bool isMoving() const;
+  void requestOpen();
+  void requestClose();
 
 private:
   enum class State : uint8_t { Boot, HomingRun, Idle, Opening, Closing, Stopping, Fault };
@@ -33,7 +37,6 @@ private:
   float measureTempC();
 
   CounterControl control_;
-
   Config::MotionConfig targetMotion_ = Config::defaultMotion();
 
   State state_ = State::Boot;
