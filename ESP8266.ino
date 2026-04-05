@@ -7,15 +7,22 @@
 #define RX_PIN D6
 #define TX_PIN D7
 #define PICO_BAUD 9600
-#define EEPROM_SIZE 128
+#define EEPROM_SIZE 64
 
 static constexpr float kGearCmPerTurn = 25.4466f;
 static constexpr unsigned long kPicoTimeoutMs = 3000UL;
-static constexpr unsigned long kConfigPushPeriodMs = 5000UL;
-static constexpr uint32_t kConfigMagic = 0x43464731UL;
+static constexpr uint32_t kConfigMagic = 0x43464733UL;
+static constexpr unsigned long kStateRequestTimeoutMs = 120UL;
+static constexpr unsigned long kConfigRequestTimeoutMs = 180UL;
+static constexpr unsigned long kDebugRefreshMs = 500UL;
 
 struct StoredConfig {
   uint32_t magic;
+  uint8_t debugFastRefresh;
+  uint8_t reserved[11];
+};
+
+struct PicoMotionConfig {
   float openTurns;
   float speedTurnsPerSec;
   float accelTurnsPerSec2;
@@ -30,39 +37,30 @@ const char* password = "B6hxR6CHJ87n";
 static float latestTemp = NAN;
 static long latestPos = 0;
 static bool latestMoving = false;
+static float latestPercent = 0.0f;
 static unsigned long lastPicoMsgMs = 0;
-static unsigned long lastConfigPushMs = 0;
 
-static StoredConfig config = {kConfigMagic, 3.6f, 1.6f, 1.6f};
+static StoredConfig config = {kConfigMagic, 0, {0}};
+static PicoMotionConfig picoCfg = {3.6f, 1.6f, 1.6f};
 
-static char picoLine[96];
+static char picoLine[128];
 static uint8_t picoIdx = 0;
 
 bool picoOnline() {
   return (millis() - lastPicoMsgMs) <= kPicoTimeoutMs;
 }
 
-float clampf(float value, float minValue, float maxValue) {
-  if (value < minValue) return minValue;
-  if (value > maxValue) return maxValue;
-  return value;
-}
-
 void sanitizeConfig() {
-  config.openTurns = clampf(config.openTurns, 0.1f, 20.0f);
-  config.speedTurnsPerSec = clampf(config.speedTurnsPerSec, 0.05f, 10.0f);
-  config.accelTurnsPerSec2 = clampf(config.accelTurnsPerSec2, 0.05f, 20.0f);
+  config.debugFastRefresh = config.debugFastRefresh ? 1 : 0;
 }
 
 void loadConfig() {
   EEPROM.begin(EEPROM_SIZE);
   EEPROM.get(0, config);
 
-  if (config.magic != kConfigMagic || isnan(config.openTurns) || isnan(config.speedTurnsPerSec) || isnan(config.accelTurnsPerSec2)) {
+  if (config.magic != kConfigMagic) {
     config.magic = kConfigMagic;
-    config.openTurns = 3.6f;
-    config.speedTurnsPerSec = 1.6f;
-    config.accelTurnsPerSec2 = 1.6f;
+    config.debugFastRefresh = 0;
   }
 
   sanitizeConfig();
@@ -75,41 +73,26 @@ void saveConfig() {
   EEPROM.commit();
 }
 
-void pushConfigToPico() {
-  sanitizeConfig();
-  picoSerial.print("CFG:OPEN=");
-  picoSerial.print(config.openTurns, 3);
-  picoSerial.print(";SPEED=");
-  picoSerial.print(config.speedTurnsPerSec, 3);
-  picoSerial.print(";ACCEL=");
-  picoSerial.println(config.accelTurnsPerSec2, 3);
-  lastConfigPushMs = millis();
+void parseCfgLine(const String& line) {
+  int openIdx = line.indexOf("OPEN=");
+  int speedIdx = line.indexOf("SPEED=");
+  int accelIdx = line.indexOf("ACCEL=");
+
+  if (openIdx >= 0) {
+    int end = line.indexOf(';', openIdx);
+    picoCfg.openTurns = line.substring(openIdx + 5, end >= 0 ? end : line.length()).toFloat();
+  }
+  if (speedIdx >= 0) {
+    int end = line.indexOf(';', speedIdx);
+    picoCfg.speedTurnsPerSec = line.substring(speedIdx + 6, end >= 0 ? end : line.length()).toFloat();
+  }
+  if (accelIdx >= 0) {
+    int end = line.indexOf(';', accelIdx);
+    picoCfg.accelTurnsPerSec2 = line.substring(accelIdx + 6, end >= 0 ? end : line.length()).toFloat();
+  }
 }
 
-void parsePicoLine(const String& line) {
-  if (line.startsWith("CFG:")) {
-    int openIdx = line.indexOf("OPEN=");
-    int speedIdx = line.indexOf("SPEED=");
-    int accelIdx = line.indexOf("ACCEL=");
-
-    if (openIdx >= 0) {
-      int end = line.indexOf(';', openIdx);
-      config.openTurns = line.substring(openIdx + 5, end >= 0 ? end : line.length()).toFloat();
-    }
-    if (speedIdx >= 0) {
-      int end = line.indexOf(';', speedIdx);
-      config.speedTurnsPerSec = line.substring(speedIdx + 6, end >= 0 ? end : line.length()).toFloat();
-    }
-    if (accelIdx >= 0) {
-      int end = line.indexOf(';', accelIdx);
-      config.accelTurnsPerSec2 = line.substring(accelIdx + 6, end >= 0 ? end : line.length()).toFloat();
-    }
-
-    sanitizeConfig();
-    saveConfig();
-    return;
-  }
-
+void parseStateLine(const String& line) {
   int tIndex = line.indexOf("T:");
   int pIndex = line.indexOf(";P:");
   int mIndex = line.indexOf(";M:");
@@ -118,13 +101,17 @@ void parsePicoLine(const String& line) {
     return;
   }
 
+  int pcIndex = line.indexOf(";PC:");
+
   String tStr = line.substring(tIndex + 2, pIndex);
   String pStr = line.substring(pIndex + 3, mIndex);
-  String mStr = line.substring(mIndex + 3);
+  String mStr = (pcIndex >= 0) ? line.substring(mIndex + 3, pcIndex) : line.substring(mIndex + 3);
+  String pcStr = (pcIndex >= 0) ? line.substring(pcIndex + 4) : "0";
 
   tStr.trim();
   pStr.trim();
   mStr.trim();
+  pcStr.trim();
 
   if (tStr == "NaN") {
     latestTemp = NAN;
@@ -134,11 +121,25 @@ void parsePicoLine(const String& line) {
 
   latestPos = pStr.toInt();
   latestMoving = (mStr.toInt() != 0);
+  latestPercent = pcStr.toFloat();
+  if (latestPercent < 0.0f) latestPercent = 0.0f;
+  if (latestPercent > 100.0f) latestPercent = 100.0f;
+}
+
+void parsePicoLine(const String& line) {
+  if (line.startsWith("CFG:")) {
+    parseCfgLine(line);
+    return;
+  }
+
+  if (line.startsWith("T:")) {
+    parseStateLine(line);
+  }
 }
 
 void readPicoNonBlocking() {
   while (picoSerial.available()) {
-    char c = (char)picoSerial.read();
+    char c = static_cast<char>(picoSerial.read());
 
     if (c == '\r') continue;
 
@@ -159,6 +160,35 @@ void readPicoNonBlocking() {
       }
     }
   }
+}
+
+void waitForPico(unsigned long timeoutMs) {
+  unsigned long start = millis();
+  while ((millis() - start) < timeoutMs) {
+    readPicoNonBlocking();
+    yield();
+    delay(1);
+  }
+}
+
+void requestStateFromPico() {
+  picoSerial.println("GETSTATE");
+  waitForPico(kStateRequestTimeoutMs);
+}
+
+void requestConfigFromPico() {
+  picoSerial.println("GETCFG");
+  waitForPico(kConfigRequestTimeoutMs);
+}
+
+void sendConfigToPico(float openTurns, float speedTurnsPerSec, float accelTurnsPerSec2) {
+  picoSerial.print("SETCFG:OPEN=");
+  picoSerial.print(openTurns, 3);
+  picoSerial.print(";SPEED=");
+  picoSerial.print(speedTurnsPerSec, 3);
+  picoSerial.print(";ACCEL=");
+  picoSerial.println(accelTurnsPerSec2, 3);
+  waitForPico(kConfigRequestTimeoutMs);
 }
 
 String navBar(const String& active) {
@@ -183,12 +213,15 @@ String baseStyle() {
   css += "button,.btn{display:inline-block;padding:14px 18px;border:none;border-radius:10px;background:#2d6cdf;color:#fff;text-decoration:none;font-size:18px;cursor:pointer;}";
   css += ".secondary{background:#333;}";
   css += ".stack{display:flex;flex-direction:column;gap:12px;}";
-  css += ".buttons{height:calc(100vh - 230px);display:flex;flex-direction:column;}";
+  css += ".buttons{height:calc(100vh - 300px);display:flex;flex-direction:column;}";
   css += "a.bigbtn{flex:1;display:flex;align-items:center;justify-content:center;font-size:16vw;font-weight:bold;text-decoration:none;color:#fff;}";
   css += ".open{background:#111;}";
   css += ".close{background:#2b2b2b;}";
   css += ".ok{color:#16c60c;font-weight:bold;}";
   css += ".bad{color:#d13438;font-weight:bold;}";
+  css += ".row{margin:8px 0;}";
+  css += ".switch{display:flex;align-items:center;gap:10px;}";
+  css += ".switch input{width:auto;transform:scale(1.4);}";
   return css;
 }
 
@@ -197,30 +230,51 @@ String makePage() {
   html += "<!DOCTYPE html><html><head>";
   html += "<meta charset='utf-8'>";
   html += "<meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>";
-  html += "<meta http-equiv='refresh' content='2'>";
   html += "<title>Comptor</title>";
   html += "<style>" + baseStyle() + "</style></head><body>";
   html += navBar("/");
   html += "<div class='card'>";
-  html += "Temp: ";
-  if (isnan(latestTemp)) {
-    html += "N/A";
-  } else {
-    html += String(latestTemp, 1) + "&deg;C";
-  }
-  html += "<br>Position: " + String(latestPos) + " pas<br>";
-  html += "Mouvement: ";
+  html += "<div class='row'>Temp: <span id='temp'>";
+  html += isnan(latestTemp) ? "N/A" : String(latestTemp, 1) + "&deg;C";
+  html += "</span></div>";
+  html += "<div class='row'>Position: <span id='posPct'>" + String(latestPercent, 1) + "</span>%</div>";
+  html += "<div class='row muted'>Position brute: <span id='posSteps'>" + String(latestPos) + "</span> pas</div>";
+  html += "<div class='row'>Mouvement: <span id='moving'>";
   html += latestMoving ? "Oui" : "Non";
-  html += "<br>Comm Pico: ";
-  html += picoOnline() ? "<span class='ok'>OK</span>" : "<span class='bad'>PERDUE</span>";
-  html += "<br><span class='muted'>Distance ouverture: ";
-  html += String(config.openTurns * kGearCmPerTurn, 1);
-  html += " cm approx</span>";
+  html += "</span></div>";
+  html += "<div class='row'>Comm Pico: <span id='comm' class='";
+  html += picoOnline() ? "ok'>OK" : "bad'>PERDUE";
+  html += "</span></div>";
+  html += "<div class='row muted'>Distance ouverture: <span id='cm'>";
+  html += String(picoCfg.openTurns * kGearCmPerTurn, 1);
+  html += "</span> cm approx</div>";
+  html += "<div class='row muted'>Mode debug: ";
+  html += config.debugFastRefresh ? "ON (refresh rapide)" : "OFF (sur demande seulement)";
+  html += "</div>";
   html += "</div>";
   html += "<div class='buttons'>";
   html += "<a class='bigbtn open' href='/open'>OUVRIR</a>";
   html += "<a class='bigbtn close' href='/close'>FERMER</a>";
-  html += "</div></body></html>";
+  html += "</div>";
+  html += "<script>";
+  html += "const debugFastRefresh=" + String(config.debugFastRefresh ? "true" : "false") + ";";
+  html += "const debugRefreshMs=" + String((unsigned long)kDebugRefreshMs) + ";";
+  html += "async function refreshState(){";
+  html += "try{";
+  html += "const r=await fetch('/api/state',{cache:'no-store'});";
+  html += "const s=await r.json();";
+  html += "document.getElementById('temp').innerHTML=s.tempText;";
+  html += "document.getElementById('posPct').textContent=s.posPct.toFixed(1);";
+  html += "document.getElementById('posSteps').textContent=s.pos;";
+  html += "document.getElementById('moving').textContent=s.moving?'Oui':'Non';";
+  html += "const c=document.getElementById('comm'); c.textContent=s.online?'OK':'PERDUE'; c.className=s.online?'ok':'bad';";
+  html += "document.getElementById('cm').textContent=s.openCm.toFixed(1);";
+  html += "}catch(e){}";
+  html += "}";
+  html += "refreshState();";
+  html += "if(debugFastRefresh){setInterval(refreshState,debugRefreshMs);}";
+  html += "</script>";
+  html += "</body></html>";
   return html;
 }
 
@@ -238,12 +292,16 @@ String makeConfigPage(bool saved) {
   }
   html += "<form method='POST' action='/config/save' class='stack'>";
   html += "<div><label for='openTurns'>Distance ouverture (tours)</label>";
-  html += "<input id='openTurns' name='openTurns' type='number' min='0.1' max='20' step='0.01' value='" + String(config.openTurns, 3) + "'></div>";
-  html += "<div class='muted'>Approx: " + String(config.openTurns * kGearCmPerTurn, 2) + " cm</div>";
+  html += "<input id='openTurns' name='openTurns' type='number' min='0.1' max='4.2' step='0.01' value='" + String(picoCfg.openTurns, 3) + "'></div>";
+  html += "<div class='muted'>Approx: " + String(picoCfg.openTurns * kGearCmPerTurn, 2) + " cm</div>";
   html += "<div><label for='speed'>Vitesse (tours/s)</label>";
-  html += "<input id='speed' name='speed' type='number' min='0.05' max='10' step='0.01' value='" + String(config.speedTurnsPerSec, 3) + "'></div>";
+  html += "<input id='speed' name='speed' type='number' min='0.05' max='2.0' step='0.01' value='" + String(picoCfg.speedTurnsPerSec, 3) + "'></div>";
   html += "<div><label for='accel'>Accélération (tours/s²)</label>";
-  html += "<input id='accel' name='accel' type='number' min='0.05' max='20' step='0.01' value='" + String(config.accelTurnsPerSec2, 3) + "'></div>";
+  html += "<input id='accel' name='accel' type='number' min='0.05' max='5.0' step='0.01' value='" + String(picoCfg.accelTurnsPerSec2, 3) + "'></div>";
+  html += "<div><label class='switch' for='debugFastRefresh'><input id='debugFastRefresh' name='debugFastRefresh' type='checkbox' value='1'";
+  html += config.debugFastRefresh ? " checked" : "";
+  html += ">Mode debug refresh rapide</label></div>";
+  html += "<div class='muted'>OFF = aucun refresh continu. ON = lecture état rapide.</div>";
   html += "<button type='submit'>Sauvegarder</button>";
   html += "</form>";
   html += "<p><a class='btn secondary' href='/config/reset'>Remettre défaut</a></p>";
@@ -256,8 +314,29 @@ void handleRoot() {
 }
 
 void handleConfigPage() {
+  requestConfigFromPico();
   bool saved = server.hasArg("saved") && server.arg("saved") == "1";
   server.send(200, "text/html", makeConfigPage(saved));
+}
+
+void handleApiState() {
+  requestStateFromPico();
+  requestConfigFromPico();
+
+  String json = "{";
+  json += "\"temp\":";
+  if (isnan(latestTemp)) json += "null"; else json += String(latestTemp, 2);
+  json += ",\"tempText\":\"";
+  json += isnan(latestTemp) ? "N/A" : String(latestTemp, 1) + "&deg;C";
+  json += "\",\"pos\":" + String(latestPos);
+  json += ",\"posPct\":" + String(latestPercent, 1);
+  json += ",\"moving\":" + String(latestMoving ? "true" : "false");
+  json += ",\"online\":" + String(picoOnline() ? "true" : "false");
+  json += ",\"openCm\":" + String(picoCfg.openTurns * kGearCmPerTurn, 2);
+  json += "}";
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", json);
 }
 
 void handleOpen() {
@@ -273,24 +352,32 @@ void handleClose() {
 }
 
 void handleConfigSave() {
-  if (server.hasArg("openTurns")) config.openTurns = server.arg("openTurns").toFloat();
-  if (server.hasArg("speed")) config.speedTurnsPerSec = server.arg("speed").toFloat();
-  if (server.hasArg("accel")) config.accelTurnsPerSec2 = server.arg("accel").toFloat();
+  float openTurns = picoCfg.openTurns;
+  float speedTurns = picoCfg.speedTurnsPerSec;
+  float accelTurns = picoCfg.accelTurnsPerSec2;
 
+  if (server.hasArg("openTurns")) openTurns = server.arg("openTurns").toFloat();
+  if (server.hasArg("speed")) speedTurns = server.arg("speed").toFloat();
+  if (server.hasArg("accel")) accelTurns = server.arg("accel").toFloat();
+
+  config.debugFastRefresh = server.hasArg("debugFastRefresh") ? 1 : 0;
   sanitizeConfig();
   saveConfig();
-  pushConfigToPico();
+
+  sendConfigToPico(openTurns, speedTurns, accelTurns);
+  requestConfigFromPico();
 
   server.sendHeader("Location", "/config?saved=1");
   server.send(303);
 }
 
 void handleConfigReset() {
-  config.openTurns = 3.6f;
-  config.speedTurnsPerSec = 1.6f;
-  config.accelTurnsPerSec2 = 1.6f;
+  config.debugFastRefresh = 0;
+  sanitizeConfig();
   saveConfig();
-  pushConfigToPico();
+
+  sendConfigToPico(3.6f, 1.6f, 1.6f);
+  requestConfigFromPico();
 
   server.sendHeader("Location", "/config?saved=1");
   server.send(303);
@@ -321,12 +408,13 @@ void setup() {
   server.on("/config", HTTP_GET, handleConfigPage);
   server.on("/config/save", HTTP_POST, handleConfigSave);
   server.on("/config/reset", HTTP_GET, handleConfigReset);
+  server.on("/api/state", HTTP_GET, handleApiState);
   server.on("/open", handleOpen);
   server.on("/close", handleClose);
   server.begin();
 
-  picoSerial.println("GETCFG");
-  pushConfigToPico();
+  requestConfigFromPico();
+  requestStateFromPico();
 
   Serial.println("Serveur web prêt");
 }
@@ -334,8 +422,4 @@ void setup() {
 void loop() {
   server.handleClient();
   readPicoNonBlocking();
-
-  if ((millis() - lastConfigPushMs) >= kConfigPushPeriodMs) {
-    pushConfigToPico();
-  }
 }
