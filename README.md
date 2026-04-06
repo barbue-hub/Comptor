@@ -2,14 +2,16 @@
 
 Pilotage d’un comptoir motorisé via **Raspberry Pi Pico**, **driver DM556** et **moteur pas-à-pas**.
 
-Cette branche (`pico_main`) est un **portage du projet Comptor vers le Pico**.  
-La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, plus de communication série avec une Arduino Nano pour les capteurs. Le Pico gère directement :
+La version principale du projet repose sur le **Pico**, qui gère localement :
 
 - le moteur pas-à-pas,
 - le fin de course bas,
 - le bouton physique,
-- le capteur de distance **HC-SR04**,
-- le capteur de température **DS18B20**.
+- les sondes de température,
+- le homing,
+- la logique de contrôle.
+
+Les anciens éléments **ESP8266 / WebUI** sont conservés dans le dépôt à titre **d’archive / legacy** seulement.
 
 ---
 
@@ -27,32 +29,33 @@ La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, 
   - `Closing`
   - `Stopping`
   - `Fault`
-- **Mesure de distance** avec HC-SR04
-- **Mesure de température** avec DS18B20
+- **Lecture de température** via **DS18B20**
 - **Comptage des cycles complets**
 - **Pilotage moteur lissé** via `StepperKiss`
-- **Timeout de sécurité** sur homing
+- **Timeout de sécurité sur homing**
+- **Fault température** si seuil dépassé
 
 ---
 
 ## Architecture du projet
 
 - `ComptorPico.ino`  
-  Point d’entrée minimal. Initialise l’application et délègue toute la logique à `ComptorApp`.
+  Point d’entrée principal. Initialise l’application et gère la boucle principale.
 
 - `ComptorApp.h / ComptorApp.cpp`  
   Logique centrale :
   - machine d’états,
   - homing,
-  - lecture des capteurs,
   - gestion du bouton,
+  - lecture température,
   - orchestration des commandes moteur.
 
 - `Config.h`  
   Paramètres du système :
   - brochage,
-  - conversion pas/tour,
-  - vitesse / accélération,
+  - paramètres moteur,
+  - conversion pas / tours / cm,
+  - seuil de température,
   - paramètres de homing,
   - debounce / long press.
 
@@ -60,7 +63,7 @@ La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, 
   Surcouche de contrôle moteur + gestion du fin de course + bouton physique.
 
 - `StepperKiss.h`  
-  Driver stepper léger avec accélération/décélération et comportement anti-stutter.
+  Driver stepper léger avec accélération/décélération.
 
 ---
 
@@ -71,8 +74,7 @@ La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, 
 - Moteur pas-à-pas
 - Fin de course bas
 - Bouton physique
-- Capteur ultrason **HC-SR04**
-- Sonde température **DS18B20**
+- 2 sondes température **DS18B20**
 - Transmission mécanique du comptoir
 
 ---
@@ -80,6 +82,7 @@ La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, 
 ## Brochage actuel
 
 ### Moteur / commande
+
 | Fonction | GPIO Pico |
 |---|---:|
 | STEP | GPIO8 |
@@ -88,14 +91,14 @@ La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, 
 | Fin de course bas | GPIO21 |
 | Bouton physique | GPIO22 |
 
-### Capteurs
+### Température
+
 | Fonction | GPIO Pico |
 |---|---:|
-| HC-SR04 Trigger | GPIO11 |
-| HC-SR04 Echo | GPIO12 |
-| DS18B20 (1-Wire) | GPIO13 |
+| DS18B20 bus 1 | GPIO28 |
+| DS18B20 bus 2 | GPIO2 |
 
-> Ajuste les pins dans `Config.h` et `ComptorApp.cpp` selon ton câblage.
+> Ajuste les pins dans `Config.h` selon ton câblage.
 
 ---
 
@@ -103,124 +106,18 @@ La logique de contrôle est maintenant **entièrement locale** : plus de WebUI, 
 
 Dans `Config.h` :
 
-- `kFullStepsPerRev = 200`
-- `kMicrostepFactor = 10`
-- `stepsPerRevolution() = 2000`
-- `openTurns = 10.0`
+- `kDipSwitch = 8000`
+- `kOpenTurns = 3.6`
+- `kSpeed = 1.6`
+- `kAcceleration = 0.0002`
 - `kGearCmPerTurn = 25.4466`
-- `kHomingTravelSteps = stepsPerRevolution() * 40`
-- `kHomingTimeoutMs = 30000`
+- `kHomingTravelSteps = stepsPerRevolution() * 20`
+- `kHomingTimeoutMs = 20000`
+- `kFaultTemperatureC = 40.0`
 - `kButtonDebounceMs = 50`
 - `kButtonLongPressMs = 5000`
 
 Conversion distance → pas :
 
-```cpp
+```cpp id="59697"
 steps = (distance_cm / 25.4466) * stepsPerRevolution()
-```
-
----
-
-## Logique de fonctionnement
-
-### Démarrage
-Au boot :
-
-1. le Pico initialise les capteurs,
-2. lit une distance initiale,
-3. initialise le contrôle moteur,
-4. passe en état `Boot`,
-5. lance immédiatement un **homing**.
-
-### Homing
-Le homing :
-
-- réduit vitesse et accélération,
-- effectue un mouvement relatif vers le bas,
-- attend la calibration par le fin de course,
-- passe en `Fault` si le timeout est dépassé.
-
-### Bouton physique
-- **Appui court**
-  - si immobile : alterne ouverture / fermeture selon la position
-  - si en mouvement : demande un arrêt contrôlé
-  - si déjà en arrêt contrôlé : prépare une inversion après arrêt complet
-
-- **Appui long**
-  - relance le homing
-
-### Température
-La température est relue périodiquement **uniquement quand le moteur est immobile**.
-
----
-
-## Dépendances
-
-Bibliothèques utilisées :
-
-- `Arduino`
-- `OneWire`
-- `DallasTemperature`
-
----
-
-## Build / flash
-
-Le projet est prévu pour un environnement Arduino compatible Pico.
-
-### En pratique
-- Ouvrir `ComptorPico.ino`
-- Sélectionner une carte **Raspberry Pi Pico**
-- Installer les bibliothèques :
-  - `OneWire`
-  - `DallasTemperature`
-- Compiler et flasher
-
-### Moniteur série
-Configurer le moniteur série à :
-
-```txt
-115200 bauds
-```
-
----
-
-## Logs série utiles
-
-Exemples de messages émis :
-
-- `[ComptorApp] Démarrage...`
-- `[BOOT] Distance initiale: ... cm`
-- `[FSM] Boot – lancement homing`
-- `[FSM] HOMING start`
-- `[FSM] Homing terminé → Idle`
-- `[FSM] Homing timeout → Fault`
-- `[FSM] Ouverture terminée`
-- `[FSM] Fermeture terminée`
-- `[FSM] Cycle complet n°...`
-- `[TEMP] ... °C`
-
----
-
-## Sécurité / garde-fous
-
-- homing au démarrage,
-- référence bas via fin de course,
-- timeout sur homing,
-- arrêt contrôlé en mouvement,
-- état `Fault` si homing invalide,
-- paramètres moteur centralisés.
-
----
-
-## Notes
-
-- Cette branche **remplace l’ancienne architecture ESP8266 + Nano + WebUI** par une version **plus simple et autonome** sur Pico.
-- `StepperKiss` reste utilisé comme base de pilotage moteur.
-- Le projet est structuré pour être facile à ajuster côté brochage, motion et logique de contrôle.
-
----
-
-## Licence
-
-Apache 2.0
