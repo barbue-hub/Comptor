@@ -16,6 +16,10 @@ static float clampf(float v, float vmin, float vmax) {
   return v;
 }
 
+static long turnsToSteps(float turns) {
+  return static_cast<long>(turns * static_cast<float>(Config::stepsPerRevolution()) + 0.5f);
+}
+
 // Temps de conversion DS18B20 selon résolution configurée.
 // 9 bits ≈ 93.75 ms, on prend une petite marge.
 static constexpr unsigned long TEMP_CONVERSION_MS = 100;
@@ -116,10 +120,7 @@ void ComptorApp::startHoming() {
 }
 
 void ComptorApp::finishHomingSuccess() {
-
-  control_.setMaxSpeedSteps(targetMotion_.maxStepsPerSecond);
-  control_.setAccelerationSteps2(targetMotion_.accelStepsPerSecond2);
-
+  applyTargetMotion(targetMotion_);
   state_ = State::Idle;
   Serial.println("[FSM] Homing terminé -> Idle");
 }
@@ -131,9 +132,7 @@ void ComptorApp::applyTargetMotion(const Config::MotionConfig& motion) {
 
 void ComptorApp::applyMotionToMotor(const Config::MotionConfig& motion) {
   applyTargetMotion(motion);
-
-  long openSteps = static_cast<long>(
-      motion.openTurns * static_cast<float>(Config::stepsPerRevolution()) + 0.5f);
+  const long openSteps = turnsToSteps(motion.openTurns);
 
   if (pendingCommand_ == Command::Open) {
     control_.moveToSteps(openSteps);
@@ -150,6 +149,13 @@ void ComptorApp::applyMotionToMotor(const Config::MotionConfig& motion) {
 
 void ComptorApp::handleButtonEvent(CounterControl::ButtonEvent event) {
   if (event == CounterControl::ButtonEvent::None) return;
+  auto invertPendingCommand = [this]() {
+    if (pendingCommand_ == Command::Open) {
+      pendingCommand_ = Command::Close;
+    } else if (pendingCommand_ == Command::Close) {
+      pendingCommand_ = Command::Open;
+    }
+  };
 
   // Long press autorisé même en Fault
   if (event == CounterControl::ButtonEvent::LongPress) {
@@ -182,11 +188,7 @@ void ComptorApp::handleButtonEvent(CounterControl::ButtonEvent event) {
 
     } else {
       // 2e clic pendant ralentissement = inverser la commande déjà prévue
-      if (pendingCommand_ == Command::Open) {
-        pendingCommand_ = Command::Close;
-      } else if (pendingCommand_ == Command::Close) {
-        pendingCommand_ = Command::Open;
-      }
+      invertPendingCommand();
 
       Serial.print("[BUTTON] Commande inversée -> ");
       Serial.println(static_cast<int>(pendingCommand_));
@@ -194,12 +196,7 @@ void ComptorApp::handleButtonEvent(CounterControl::ButtonEvent event) {
 
   } else {
     if (state_ == State::Idle) {
-      long pos = control_.positionSteps();
-      if (pos == 0) {
-        pendingCommand_ = Command::Open;
-      } else {
-        pendingCommand_ = Command::Close;
-      }
+      pendingCommand_ = (control_.positionSteps() == 0) ? Command::Open : Command::Close;
     }
   }
 }

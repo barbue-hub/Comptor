@@ -18,6 +18,20 @@ static float clampf_local(float v, float vmin, float vmax) {
   return v;
 }
 
+static float parseFloatField(const String& source, const String& upperSource, const char* key, uint8_t keyLen, float fallback) {
+  const int fieldIdx = upperSource.indexOf(key);
+  if (fieldIdx < 0) return fallback;
+
+  const int endIdx = upperSource.indexOf(';', fieldIdx);
+  const String value = source.substring(fieldIdx + keyLen, endIdx >= 0 ? endIdx : source.length());
+  return value.toFloat();
+}
+
+static void logEspCommand(const __FlashStringHelper* label) {
+  Serial.print(F("[ESP] "));
+  Serial.println(label);
+}
+
 void sendState() {
   const float temp = app.latestTemp();
   const long pos = app.positionSteps();
@@ -64,20 +78,20 @@ void handleEspCommand(String cmd) {
   if (upper == "OPEN") {
     app.requestOpen();
     sendState();
-    Serial.println("[ESP] OPEN");
+    logEspCommand(F("OPEN"));
     return;
   }
 
   if (upper == "CLOSE") {
     app.requestClose();
     sendState();
-    Serial.println("[ESP] CLOSE");
+    logEspCommand(F("CLOSE"));
     return;
   }
 
   if (upper == "GETCFG") {
     sendConfig();
-    Serial.println("[ESP] GETCFG");
+    logEspCommand(F("GETCFG"));
     return;
   }
 
@@ -87,31 +101,9 @@ void handleEspCommand(String cmd) {
   }
 
   if (upper.startsWith("SETCFG:") || upper.startsWith("CFG:")) {
-    float openTurns = app.openTurns();
-    float speedTurns = app.maxSpeedTurnsPerSecond();
-    float accelTurns = app.accelTurnsPerSecond2();
-
-    int openIdx = upper.indexOf("OPEN=");
-    int speedIdx = upper.indexOf("SPEED=");
-    int accelIdx = upper.indexOf("ACCEL=");
-
-    if (openIdx >= 0) {
-      int end = upper.indexOf(';', openIdx);
-      String v = cmd.substring(openIdx + 5, end >= 0 ? end : cmd.length());
-      openTurns = v.toFloat();
-    }
-
-    if (speedIdx >= 0) {
-      int end = upper.indexOf(';', speedIdx);
-      String v = cmd.substring(speedIdx + 6, end >= 0 ? end : cmd.length());
-      speedTurns = v.toFloat();
-    }
-
-    if (accelIdx >= 0) {
-      int end = upper.indexOf(';', accelIdx);
-      String v = cmd.substring(accelIdx + 6, end >= 0 ? end : cmd.length());
-      accelTurns = v.toFloat();
-    }
+    const float openTurns = parseFloatField(cmd, upper, "OPEN=", 5, app.openTurns());
+    const float speedTurns = parseFloatField(cmd, upper, "SPEED=", 6, app.maxSpeedTurnsPerSecond());
+    const float accelTurns = parseFloatField(cmd, upper, "ACCEL=", 6, app.accelTurnsPerSecond2());
 
     app.updateMotionConfigTurns(openTurns, speedTurns, accelTurns);
     sendConfig();
@@ -135,6 +127,7 @@ void readEspNonBlocking() {
       if (espIdx < sizeof(espLine) - 1) {
         espLine[espIdx++] = c;
       } else {
+        // Ligne trop longue: on réinitialise le buffer pour repartir proprement.
         espIdx = 0;
       }
     }
