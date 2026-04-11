@@ -69,18 +69,17 @@ void ComptorApp::begin() {
   sensors1.setWaitForConversion(false);
   sensors2.setWaitForConversion(false);
 
-  // Initialiser le contrôle moteur et les périphériques
-  control_.begin(Config::kStepPin, Config::kDirPin, Config::kEnablePin, Config::kEnableActiveLow,
-                 Config::kLimitBottomPin, Config::kLimitActiveLow,
-                 Config::kButtonPin, Config::kButtonActiveLow,
-                 Config::stepsPerRevolution(), Config::defaultMotion(),
-                 Config::kButtonDebounceMs, Config::kButtonLongPressMs);
-
-  // Appliquer la configuration motion par défaut
+  // Conserver la config par défaut comme source de vérité logique
   targetMotion_ = Config::defaultMotion();
-  control_.setOpenTurns(targetMotion_.openTurns);
-  control_.setMaxSpeedSteps(targetMotion_.maxStepsPerSecond);
-  control_.setAccelerationSteps2(targetMotion_.accelStepsPerSecond2);
+
+  // Initialiser le contrôle moteur et les périphériques
+  // CounterControl::begin() applique déjà la motion reçue.
+  control_.begin(Config::kStepPin, Config::kDirPin, Config::kEnablePin, Config::kEnableActiveLow,
+                 Config::klimitClosePin, Config::kLimitCloseActiveLow,
+                 Config::kLimitOpenPin, Config::kLimitOpenActiveLow,
+                 Config::kButtonPin, Config::kButtonActiveLow,
+                 Config::stepsPerRevolution(), targetMotion_,
+                 Config::kButtonDebounceMs, Config::kButtonLongPressMs);
 
   // Démarrer en état Boot afin de lancer immédiatement un homing
   state_ = State::Boot;
@@ -228,7 +227,7 @@ void ComptorApp::tickStateMachine() {
       }
 
     case State::Idle:
-    control_.enableMotor(Config::kEnableIDLE);
+      control_.enableMotor(Config::kEnableIDLE);
       if (pendingCommand_ != Command::None) {
         pollTemperature();
         delay(200);
@@ -322,7 +321,7 @@ void ComptorApp::pollTemperature() {
           Serial.print(Config::kFaultTemperatureC, 1);
           Serial.println(" C");
         }
-      } else{
+      } else {
         faultTemp = false;
       }
     } else {
@@ -333,6 +332,7 @@ void ComptorApp::pollTemperature() {
     tempConversionInProgress = false;
   }
 }
+
 float ComptorApp::latestTemp() const {
   return latestTempC_;
 }

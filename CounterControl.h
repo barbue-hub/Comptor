@@ -1,6 +1,6 @@
-// CounterControl : surcouche pour la gestion d’un moteur pas‑à‑pas, d’un fin
-// de course et d’un bouton physique. Cette version est identique à celle du
-// projet d’origine, adaptée pour fonctionner sur Raspberry Pi Pico.
+// CounterControl : surcouche pour la gestion d'un moteur pas-à-pas, de deux
+// fins de course et d'un bouton physique. Cette version est adaptée pour le
+// Raspberry Pi Pico.
 
 #pragma once
 
@@ -11,30 +11,37 @@
 
 class CounterControl {
 public:
-  enum class ButtonEvent : uint8_t { None,
-                                     ShortPress,
-                                     LongPress };
+  enum class ButtonEvent : uint8_t {
+    None,
+    ShortPress,
+    LongPress
+  };
 
   void begin(uint8_t stepPin, uint8_t dirPin, int8_t enaPin, bool enaActiveLow,
-             uint8_t limitPin, bool limitActiveLow,
+             uint8_t limitClosePin, bool limitCloseActiveLow,
+             uint8_t limitOpenPin, bool limitOpenActiveLow,
              int8_t buttonPin, bool buttonActiveLow,
              long stepsPerRev, const Config::MotionConfig& motion,
              unsigned long debounceMs, unsigned long longPressMs) {
     _stepsPerRev = stepsPerRev;
-    _limitPin = limitPin;
-    _limitActiveLow = limitActiveLow;
+    _limitClosePin = limitClosePin;
+    _limitCloseActiveLow = limitCloseActiveLow;
+    _limitOpenPin = limitOpenPin;
+    _limitOpenActiveLow = limitOpenActiveLow;
     _buttonPin = buttonPin;
     _buttonActiveLow = buttonActiveLow;
     _debounceMs = debounceMs;
     _longPressMs = longPressMs;
 
-    pinMode(_limitPin, INPUT);
+    pinMode(_limitClosePin, INPUT);
+    pinMode(_limitOpenPin, INPUT);
     pinMode(_buttonPin, INPUT);
 
     _motor.begin(stepPin, dirPin, enaPin, enaActiveLow);
     _motor.enable(true);
     applyMotion(motion);
   }
+
   void enableMotor(bool enable) {
     _motor.enable(enable);
   }
@@ -77,24 +84,38 @@ public:
     _motor.moveTo(_motor.currentPosition());
   }
 
-  ButtonEvent poll() {
-    const bool limitActive = readLimit();
-    if (limitActive && !_limitLatched) {
-      Serial.println("Limit SW fermée");
-      //i++;
-      //Serial.print(i);
-      _limitLatched = true;
-      _motor.emergencyStop();
-      _motor.setCurrentPosition(0);
-      _motor.moveTo(0);
-      _lastCalibMs = millis();
-    } else if (!limitActive) {
-      _limitLatched = false;
-    }
-
-    _motor.run();
-    return updateButton();
+ ButtonEvent poll() {
+  const bool closeActive = readCloseLimit();
+  if (closeActive && !_limitCloseLatched) {
+    Serial.println("Limit FERMER");
+    _limitCloseLatched = true;
+    emergencyStop();
+    _motor.setCurrentPosition(0);
+    _motor.moveTo(0);
+    _lastCalibMs = millis();
+  } else if (!closeActive) {
+    _limitCloseLatched = false;
   }
+
+  const bool movingTowardOpen = _motor.targetPosition() > _motor.currentPosition();
+
+  if (movingTowardOpen) {
+    const bool openActive = readOpenLimit();
+    if (openActive && !_limitOpenLatched) {
+      Serial.println("Limit OUVERT");
+      _limitOpenLatched = true;
+      emergencyStop();
+      moveToSteps(positionSteps());
+    } else if (!openActive) {
+      _limitOpenLatched = false;
+    }
+  } else {
+    _limitOpenLatched = false;
+  }
+
+  _motor.run();
+  return updateButton();
+}
 
   long positionSteps() const {
     return _motor.currentPosition();
@@ -109,24 +130,33 @@ public:
   }
 
 private:
-  bool readLimit() {
+  bool readDebouncedLimit(uint8_t pin, bool activeLow,
+                          bool& rawLast, bool& stable, unsigned long& changeMs) {
     const unsigned long now = millis();
 
-    // lecture brute (active = true)
-    const int v = digitalRead(_limitPin);
-    const bool raw = _limitActiveLow ? (v == LOW) : (v == HIGH);
+    const int v = digitalRead(pin);
+    const bool raw = activeLow ? (v == LOW) : (v == HIGH);
 
-    if (raw != _limitRawLast) {
-      _limitRawLast = raw;
-      _limitChangeMs = now;  // on vient de changer -> reset timer
+    if (raw != rawLast) {
+      rawLast = raw;
+      changeMs = now;
     }
 
-    // si l'état est resté identique assez longtemps, on le valide
-    if ((now - _limitChangeMs) >= _debounceMs) {
-      _limitStable = raw;
+    if ((now - changeMs) >= _debounceMs) {
+      stable = raw;
     }
 
-    return _limitStable;
+    return stable;
+  }
+
+  bool readCloseLimit() {
+    return readDebouncedLimit(_limitClosePin, _limitCloseActiveLow,
+                              _closeRawLast, _closeStable, _closeChangeMs);
+  }
+
+  bool readOpenLimit() {
+    return readDebouncedLimit(_limitOpenPin, _limitOpenActiveLow,
+                              _openRawLast, _openStable, _openChangeMs);
   }
 
   ButtonEvent updateButton() {
@@ -140,7 +170,7 @@ private:
         _buttonWasPressed = true;
         _buttonPressMs = now;
         _buttonLongSent = false;
-      } else if (!_buttonLongSent && (now - _buttonPressMs) >= _longPressMs && !readLimit()) {
+      } else if (!_buttonLongSent && (now - _buttonPressMs) >= _longPressMs && !readCloseLimit()) {
         _buttonLongSent = true;
         return ButtonEvent::LongPress;
       }
@@ -161,20 +191,30 @@ private:
 
   long _stepsPerRev = Config::stepsPerRevolution();
   long _openSteps = 0;
-  uint8_t _limitPin = 255;
+
+  uint8_t _limitClosePin = 255;
+  uint8_t _limitOpenPin = 255;
   int8_t _buttonPin = -1;
-  bool _limitActiveLow = true;
+
+  bool _limitCloseActiveLow = true;
+  bool _limitOpenActiveLow = true;
   bool _buttonActiveLow = true;
-  bool _limitLatched = false;
+
+  bool _limitCloseLatched = false;
+  bool _limitOpenLatched = false;
   unsigned long _lastCalibMs = 0;
-  int i = 0;
+
   unsigned long _debounceMs = 50;
   unsigned long _longPressMs = 5000;
   bool _buttonWasPressed = false;
   bool _buttonLongSent = false;
   unsigned long _buttonPressMs = 0;
-  // --- Debounce limit ---
-  bool _limitRawLast = false;
-  bool _limitStable = false;
-  unsigned long _limitChangeMs = 0;
+
+  bool _closeRawLast = false;
+  bool _closeStable = false;
+  unsigned long _closeChangeMs = 0;
+
+  bool _openRawLast = false;
+  bool _openStable = false;
+  unsigned long _openChangeMs = 0;
 };
